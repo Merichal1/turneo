@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "445354161677",
+    "project_id": "turneo-f9966",
+    "storage_bucket": "turneo-f9966.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:445354161677:android:5edf3c1a6ceccc9b568744",
+        "android_client_info": {
+          "package_name": "com.example.my_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDDRCCTi2FDALvTZOhA4-YXzVu1Hrd-cUQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
