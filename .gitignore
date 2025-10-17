@@ -1,22 +1,13 @@
-# Flutter
 build/
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
 pubspec.lock
-
-# iOS
 ios/Pods/
-
-# Android
 android/.gradle/
 android/local.properties
-
-# Firebase (claves locales)
 google-services.json
 GoogleService-Info.plist
-
-# IDE
 .vscode/
 .idea/
