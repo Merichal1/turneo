@@ -77,7 +77,12 @@ class TurneoApp extends StatelessWidget {
         darkTheme: AppTheme.vogueGlovoDark,
         themeMode: ThemeMode.system,
 
-        initialRoute: Routes.debugLauncher, // '/_debug'
+        // Mantengo tu ruta inicial actual:
+        initialRoute: Routes.welcome, // '/_debug'
+
+        // 👉 Si quieres probar directamente la nueva UI del ZIP:
+        // initialRoute: Routes.welcome,
+
         routes: Routes.builders,
 
         onUnknownRoute: (_) => MaterialPageRoute(

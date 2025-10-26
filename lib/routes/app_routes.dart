@@ -1,9 +1,14 @@
 import 'package:flutter/widgets.dart';
 
-// AUTH
+// AUTH ORIGINAL
 import '../screens/auth/login_screen.dart';
 import '../screens/auth/register_screen.dart';
 import '../screens/auth/change_password_screen.dart';
+
+// AUTH NUEVA (ZIP)
+import '../auth_ui/Screens/Welcome/welcome_screen.dart' as zip;
+import '../auth_ui/Screens/Login/login_screen.dart' as zip;
+import '../auth_ui/Screens/Signup/signup_screen.dart' as zip;
 
 // COMMON
 import '../screens/common/splash_screen.dart';
@@ -17,7 +22,6 @@ import '../screens/admin/admin_database_screen.dart';
 import '../screens/admin/admin_import_screen.dart';
 import '../screens/admin/admin_payments_history_screen.dart';
 import '../screens/admin/admin_notificaciones_screen.dart';
-
 
 // WORKER
 import '../screens/worker/worker_home_screen.dart';
@@ -34,10 +38,15 @@ class Routes {
   static const splash = '/splash';
   static const error = '/error';
 
-  // Auth
+  // Auth (original)
   static const login = '/auth/login';
   static const register = '/auth/register';
   static const changePassword = '/auth/change-password';
+
+  // Auth nueva (ZIP)
+  static const welcome = '/auth/welcome';
+  static const loginZip = '/auth/login-zip';
+  static const registerZip = '/auth/register-zip';
 
   // Admin
   static const adminShell = '/admin';
@@ -52,7 +61,7 @@ class Routes {
   static const workerHome = '/worker/home';
   static const workerEvents = '/worker/events';
 
-  /// Mapa de rutas -> builders. Mantén todo centralizado aquí.
+  /// Mapa de rutas -> builders
   static Map<String, WidgetBuilder> builders = {
     // Debug
     debugLauncher: (_) => const DebugLauncherScreen(),
@@ -61,23 +70,26 @@ class Routes {
     splash: (_) => const SplashScreen(),
     error: (_) => const ErrorScreen(),
 
-    // Auth
+    // AUTH ORIGINAL
     login: (_) => const LoginScreen(),
     register: (_) => const RegisterScreen(),
     changePassword: (_) => const ChangePasswordScreen(),
 
-    // Admin
+    // AUTH NUEVA (ZIP)
+    welcome: (_) => const zip.WelcomeScreen(),
+    loginZip: (_) => const zip.LoginScreen(),
+    registerZip: (_) => const zip.SignUpScreen(),
+
     // ADMIN
-      adminShell: (_) => const AdminShellScreen(),
-      adminHome: (_) => const AdminHomeScreen(),
-      adminEvents: (_) => const AdminEventScreen(),
-      adminDatabase: (_) => const AdminDatabaseScreen(),
-      adminImport: (_) => const AdminImportScreen(),
-      adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),
-      adminNotifications: (_) => const AdminNotificacionesScreen(), // ✅ corregido
+    adminShell: (_) => const AdminShellScreen(),
+    adminHome: (_) => const AdminHomeScreen(),
+    adminEvents: (_) => const AdminEventScreen(),
+    adminDatabase: (_) => const AdminDatabaseScreen(),
+    adminImport: (_) => const AdminImportScreen(),
+    adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),
+    adminNotifications: (_) => const AdminNotificacionesScreen(),
 
-
-    // Worker
+    // WORKER
     workerHome: (_) => const WorkerHomeScreen(),
     workerEvents: (_) => const WorkerEventScreen(),
   };

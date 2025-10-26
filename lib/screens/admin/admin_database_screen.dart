@@ -2,12 +2,24 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
+/// ============================================================================
+/// IDs DE DEMO GLOBALES (accesibles en todo el archivo)
+/// ============================================================================
+const String kDemoCompanyId = 'company_demo';
+const String kDemoEventId = 'EVT_demo';
+const String kDemoChatId = 'CHAT_demo';
+const String kDemoNotificationId = 'NOTIF_demo';
+const String kDemoUserAdminId = 'user_admin';
+const String kDemoUserWorkerId = 'user_worker1';
 
 /// ------------ CONFIGURACIÓN DE COLECCIONES (columnas y etiquetas) ------------
+/// ================== CONFIG TABLA FIRESTORE ==================
+/// Modelos de configuración de la tabla (no toques estilos/UX)
+
 class CollectionConfig {
   final String title;
   final List<ColumnSpec> columns; // qué campos mostramos en la tabla
-  final List<String> quickSearchIn; // campos para buscar
+  final List<String> quickSearchIn; // campos para buscar (admite dot-path)
   const CollectionConfig({
     required this.title,
     required this.columns,
@@ -16,12 +28,12 @@ class CollectionConfig {
 }
 
 class ColumnSpec {
-  final String field;
+  final String field; // admite dot-path (ej: location.address.city, employmentDetails.position)
   final String label;
   final bool isBoolean;
   final bool isTimestamp;
   final bool shrink; // para iconos/chips
-  final String? Function(Map<String, dynamic> row)? compute; // p.ej nombre completo
+  final String? Function(Map<String, dynamic> row)? compute; // p.ej. nombre completo
   const ColumnSpec({
     required this.field,
     required this.label,
@@ -32,25 +44,198 @@ class ColumnSpec {
   });
 }
 
-const Map<String, CollectionConfig> kCollections = {
+/// --- helpers seguros ---
+dynamic _readPath(Map<String, dynamic> map, String path) {
+  if (path.isEmpty) return null;
+  if (!path.contains('.')) return map[path];
+  dynamic cur = map;
+  for (final part in path.split('.')) {
+    if (cur is Map && cur.containsKey(part)) {
+      cur = cur[part];
+    } else {
+      return null;
+    }
+  }
+  return cur;
+}
+
+String _safeString(dynamic v) => v?.toString() ?? '-';
+
+// Colecciones soportadas por la UI (escribe rutas en la barra lateral)
+// ⚠️ Los CollectionConfig que usan 'compute' NO deben ser const.
+final Map<String, CollectionConfig> kCollections = {
+  // -------- USERS (GLOBAL) --------
   'users': CollectionConfig(
     title: 'Usuarios',
-    quickSearchIn: ['nombre', 'apellidos', 'email', 'telefono', 'dni'],
+    quickSearchIn: const [
+      'name.firstName',
+      'name.lastName',
+      'email',
+      'phoneNumber',
+      'companyId',
+      'employmentDetails.position',
+    ],
     columns: [
-      ColumnSpec(field: 'nombre', label: 'Nombre'),
-      ColumnSpec(field: 'apellidos', label: 'Apellidos'),
-      ColumnSpec(field: 'email', label: 'Email'),
-      ColumnSpec(field: 'telefono', label: 'Teléfono', shrink: true),
-      ColumnSpec(field: 'puesto', label: 'Puesto', shrink: true),
-      ColumnSpec(field: 'role', label: 'Rol', shrink: true),
-      ColumnSpec(field: 'activo', label: 'Activo', isBoolean: true, shrink: true),
-      ColumnSpec(field: 'vehiculo', label: 'Vehículo', isBoolean: true, shrink: true),
-      ColumnSpec(field: 'carnetConducir', label: 'Carnet', isBoolean: true, shrink: true),
-      ColumnSpec(field: 'createdAt', label: 'Alta', isTimestamp: true, shrink: true),
+      ColumnSpec(
+        field: 'name',
+        label: 'Nombre',
+        compute: (r) {
+          final f = _readPath(r, 'name.firstName');
+          final l = _readPath(r, 'name.lastName');
+          return [f, l].where((e) => (e ?? '').toString().isNotEmpty).join(' ');
+        },
+      ),
+      const ColumnSpec(field: 'email', label: 'Email'),
+      const ColumnSpec(field: 'phoneNumber', label: 'Teléfono', shrink: true),
+      const ColumnSpec(field: 'companyId', label: 'Empresa', shrink: true),
+      const ColumnSpec(field: 'role', label: 'Rol', shrink: true),
+      const ColumnSpec(field: 'employmentDetails.position', label: 'Puesto', shrink: true),
+      const ColumnSpec(field: 'employmentDetails.experienceLevel', label: 'Nivel', shrink: true),
+      const ColumnSpec(field: 'employmentDetails.hasDriverLicense', label: 'Carnet', isBoolean: true, shrink: true),
+      const ColumnSpec(field: 'employeeType', label: 'Contrato', shrink: true),
+      const ColumnSpec(field: 'preferredContactMethod', label: 'Contacto', shrink: true),
+      const ColumnSpec(field: 'isActive', label: 'Activo', isBoolean: true, shrink: true),
     ],
   ),
-  // Añade más colecciones aquí si quieres...
+
+  // -------- AVAILABILITY (SUBCOL DE USERS) --------
+  // Ruta: "users/{userId}/availabilityExceptions"
+  'users/*/availabilityExceptions': const CollectionConfig(
+    title: 'No disponibilidad',
+    quickSearchIn: ['reason'],
+    columns: [
+      ColumnSpec(field: 'startDate', label: 'Inicio', isTimestamp: true, shrink: true),
+      ColumnSpec(field: 'endDate', label: 'Fin', isTimestamp: true, shrink: true),
+      ColumnSpec(field: 'reason', label: 'Motivo'),
+    ],
+  ),
+
+  // -------- COMPANIES --------
+  'companies': const CollectionConfig(
+    title: 'Empresas',
+    quickSearchIn: ['name', 'contactEmail', 'phoneNumber', 'address.city'],
+    columns: [
+      ColumnSpec(field: 'name', label: 'Nombre'),
+      ColumnSpec(field: 'contactEmail', label: 'Email', shrink: true),
+      ColumnSpec(field: 'phoneNumber', label: 'Teléfono', shrink: true),
+      ColumnSpec(field: 'address.street', label: 'Calle'),
+      ColumnSpec(field: 'address.city', label: 'Ciudad', shrink: true),
+      ColumnSpec(field: 'address.postalCode', label: 'CP', shrink: true),
+      ColumnSpec(field: 'address.country', label: 'País', shrink: true),
+      ColumnSpec(field: 'logoUrl', label: 'Logo', shrink: true),
+    ],
+  ),
+
+  // -------- EVENTS (SUBCOL DE COMPANIES) --------
+  // Ruta: "companies/{companyId}/events"
+  'companies/*/events': CollectionConfig(
+    title: 'Eventos',
+    quickSearchIn: const ['name', 'description', 'location.name', 'location.address.city', 'status'],
+    columns: [
+      const ColumnSpec(field: 'name', label: 'Nombre'),
+      const ColumnSpec(field: 'description', label: 'Descripción'),
+      ColumnSpec(
+        field: 'location.address.city',
+        label: 'Ciudad',
+        shrink: true,
+        compute: (r) => _safeString(_readPath(r, 'location.address.city')),
+      ),
+      const ColumnSpec(field: 'startDate', label: 'Inicio', isTimestamp: true, shrink: true),
+      const ColumnSpec(field: 'endDate', label: 'Fin', isTimestamp: true, shrink: true),
+      const ColumnSpec(field: 'status', label: 'Estado', shrink: true),
+      ColumnSpec(
+        field: 'requiredRoles',
+        label: 'Roles requeridos',
+        shrink: true,
+        compute: (r) {
+          final m = r['requiredRoles'];
+          if (m is Map) {
+            return m.entries.map((e) => '${e.key}:${e.value}').join(', ');
+          }
+          return '-';
+        },
+      ),
+      const ColumnSpec(field: 'creatorId', label: 'Creador', shrink: true),
+    ],
+  ),
+
+  // -------- STAFF ASSIGNMENTS (SUBCOL DE EVENTS) --------
+  // Ruta: "companies/{companyId}/events/{eventId}/staffAssignments"
+  'companies/*/events/*/staffAssignments': const CollectionConfig(
+    title: 'Asignaciones de evento',
+    quickSearchIn: ['staffId', 'assignedRole', 'offerStatus', 'paymentStatus'],
+    columns: [
+      ColumnSpec(field: 'staffId', label: 'Empleado', shrink: true),
+      ColumnSpec(field: 'assignedRole', label: 'Rol asignado', shrink: true),
+      ColumnSpec(field: 'offerStatus', label: 'Oferta', shrink: true),
+      ColumnSpec(field: 'adminConfirmation', label: 'Confirmación admin', isBoolean: true, shrink: true),
+      ColumnSpec(field: 'paymentStatus', label: 'Pago', shrink: true),
+      ColumnSpec(field: 'offerSentTimestamp', label: 'Enviada', isTimestamp: true, shrink: true),
+      ColumnSpec(field: 'responseTimestamp', label: 'Respondida', isTimestamp: true, shrink: true),
+      ColumnSpec(field: 'confirmedByAdminTimestamp', label: 'Confirmada', isTimestamp: true, shrink: true),
+    ],
+  ),
+
+  // -------- NOTIFICATIONS (SUBCOL DE COMPANIES) --------
+  // Ruta: "companies/{companyId}/notifications"
+  'companies/*/notifications': const CollectionConfig(
+    title: 'Notificaciones',
+    quickSearchIn: ['type', 'message', 'relatedEventId', 'senderId'],
+    columns: [
+      ColumnSpec(field: 'type', label: 'Tipo', shrink: true),
+      ColumnSpec(field: 'message', label: 'Mensaje'),
+      ColumnSpec(field: 'relatedEventId', label: 'Evento', shrink: true),
+      ColumnSpec(field: 'senderId', label: 'Remitente', shrink: true),
+      ColumnSpec(field: 'timestamp', label: 'Fecha', isTimestamp: true, shrink: true),
+    ],
+  ),
+
+  // Ruta: "companies/{companyId}/notifications/{notificationId}/individualStatuses"
+  'companies/*/notifications/*/individualStatuses': const CollectionConfig(
+    title: 'Estados notificación',
+    quickSearchIn: ['status', 'response'],
+    columns: [
+      ColumnSpec(field: '_id', label: 'Usuario', shrink: true),
+      ColumnSpec(field: 'status', label: 'Estado', shrink: true),
+      ColumnSpec(field: 'response', label: 'Respuesta', shrink: true),
+      ColumnSpec(field: 'timestamp', label: 'Fecha', isTimestamp: true, shrink: true),
+    ],
+  ),
+
+  // -------- CHATS (SUBCOL DE COMPANIES) --------
+  // Ruta: "companies/{companyId}/chats"
+  'companies/*/chats': CollectionConfig(
+    title: 'Chats',
+    quickSearchIn: const ['type', 'participants', 'relatedEventId'],
+    columns: [
+      ColumnSpec(
+        field: 'participants',
+        label: 'Participantes',
+        compute: (r) {
+          final list = r['participants'];
+          if (list is List) return list.join(', ');
+          return '-';
+        },
+        shrink: true,
+      ),
+      const ColumnSpec(field: 'type', label: 'Tipo', shrink: true),
+      const ColumnSpec(field: 'relatedEventId', label: 'Evento', shrink: true),
+      const ColumnSpec(field: 'createdAt', label: 'Creado', isTimestamp: true, shrink: true),
+    ],
+  ),
+
+  // Ruta: "companies/{companyId}/chats/{chatId}/messages"
+  'companies/*/chats/*/messages': const CollectionConfig(
+    title: 'Mensajes',
+    quickSearchIn: ['content', 'senderId'],
+    columns: [
+      ColumnSpec(field: 'senderId', label: 'De', shrink: true),
+      ColumnSpec(field: 'content', label: 'Mensaje'),
+      ColumnSpec(field: 'timestamp', label: 'Fecha', isTimestamp: true, shrink: true),
+    ],
+  ),
 };
+// ================== FIN CONFIG TABLA FIRESTORE ==================
 
 /// ------------------------- PANTALLA PRINCIPAL -------------------------
 class AdminDatabaseScreen extends StatefulWidget {
@@ -63,18 +248,32 @@ class AdminDatabaseScreen extends StatefulWidget {
 class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
   final _pathCtrl = TextEditingController(text: 'users');
   final _searchCtrl = TextEditingController();
-  final _favorites = <String>['users', 'events', 'payments', 'notifications'];
+
+  // Lista fija de colecciones/rutas visibles en la barra lateral
+  final List<String> _navCollections = [
+    'users',
+    'users/$kDemoUserWorkerId/availabilityExceptions',
+    'companies',
+    'companies/$kDemoCompanyId/events',
+    'companies/$kDemoCompanyId/events/$kDemoEventId/staffAssignments',
+    'companies/$kDemoCompanyId/notifications',
+    'companies/$kDemoCompanyId/notifications/$kDemoNotificationId/individualStatuses',
+    'companies/$kDemoCompanyId/chats',
+    'companies/$kDemoCompanyId/chats/$kDemoChatId/messages',
+  ];
+
   String _selectedPath = 'users';
   int _limit = 100;
 
   // Filtros sencillos pensados para "users"
-  String _roleFilter = 'Todos';
-  bool? _activoFilter; // null = todos
+  String _roleFilter = 'Todos'; // Todos | admin | staff
+  bool? _isActiveFilter; // null = todos
 
   @override
   void initState() {
     super.initState();
     _selectedPath = _pathCtrl.text.trim();
+    _crearDatosDemo(); // crea ejemplos en todas las “carpetas” si faltan
   }
 
   @override
@@ -113,7 +312,7 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
     Map<String, dynamic>? result;
 
     if (_selectedPath == 'users') {
-      // Formulario específico con validaciones
+      // Formulario específico con validaciones (adaptado a tu schema)
       result = await showDialog<Map<String, dynamic>>(
         context: context,
         builder: (_) => const _UserFormDialog(title: 'Nuevo usuario'),
@@ -157,7 +356,6 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
     }
 
     if (result != null) {
-      // merge:true para no perder campos que no estén en el formulario
       await _collectionRef().doc(docId).set(result, SetOptions(merge: true));
       _snack('Documento guardado.');
     }
@@ -209,9 +407,9 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
                     Expanded(
                       child: TextField(
                         controller: _pathCtrl,
-                        decoration: const InputDecoration(
-                          hintText: 'ej. users o events/ABC/shifts',
-                          prefixIcon: Icon(Icons.folder_outlined),
+                        decoration: InputDecoration(
+                          hintText: 'ej. users o companies/$kDemoCompanyId/events',
+                          prefixIcon: const Icon(Icons.folder_outlined),
                         ),
                         onSubmitted: (_) => _openPath(_pathCtrl.text),
                       ),
@@ -221,38 +419,19 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    const Text('Favoritos', style: TextStyle(fontWeight: FontWeight.w800)),
-                    const Spacer(),
-                    IconButton(
-                      tooltip: 'Añadir favorito',
-                      onPressed: () {
-                        final p = _pathCtrl.text.trim();
-                        if (p.isEmpty) return;
-                        if (!_favorites.contains(p)) setState(() => _favorites.add(p));
-                      },
-                      icon: const Icon(Icons.star_border),
-                    )
-                  ],
-                ),
+                const Text('Colecciones', style: TextStyle(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
                 Expanded(
                   child: ListView.separated(
-                    itemCount: _favorites.length,
+                    itemCount: _navCollections.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (_, i) {
-                      final p = _favorites[i];
+                      final p = _navCollections[i];
                       final sel = p == _selectedPath;
                       return ListTile(
                         dense: true,
                         leading: Icon(sel ? Icons.folder : Icons.folder_open_outlined),
                         title: Text(p, maxLines: 1, overflow: TextOverflow.ellipsis),
-                        trailing: IconButton(
-                          tooltip: 'Quitar',
-                          onPressed: () => setState(() => _favorites.removeAt(i)),
-                          icon: const Icon(Icons.close, size: 18),
-                        ),
                         selected: sel,
                         onTap: () => _openPath(p),
                       );
@@ -305,24 +484,24 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
                       if (_selectedPath == 'users') ...[
                         DropdownButton<String>(
                           value: _roleFilter,
-                          items: const ['Todos', 'admin', 'worker', 'user']
+                          items: const ['Todos', 'admin', 'staff']
                               .map((r) => DropdownMenuItem(value: r, child: Text('Rol: $r')))
                               .toList(),
                           onChanged: (v) => setState(() => _roleFilter = v ?? 'Todos'),
                         ),
                         const SizedBox(width: 8),
                         DropdownButton<String>(
-                          value: _activoFilter == null
+                          value: _isActiveFilter == null
                               ? 'Todos'
-                              : (_activoFilter! ? 'Activos' : 'Inactivos'),
+                              : (_isActiveFilter! ? 'Activos' : 'Inactivos'),
                           items: const ['Todos', 'Activos', 'Inactivos']
                               .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                               .toList(),
                           onChanged: (v) {
                             setState(() {
-                              if (v == 'Activos') _activoFilter = true;
-                              else if (v == 'Inactivos') _activoFilter = false;
-                              else _activoFilter = null;
+                              if (v == 'Activos') _isActiveFilter = true;
+                              else if (v == 'Inactivos') _isActiveFilter = false;
+                              else _isActiveFilter = null;
                             });
                           },
                         ),
@@ -354,7 +533,7 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
                   child: !_isCollectionPath
                       ? Center(
                           child: Text(
-                            'La ruta seleccionada no es una colección.\nEjemplos: "users" o "events/ABC/shifts".',
+                            'La ruta seleccionada no es una colección.\nEjemplos: "users" o "companies/$kDemoCompanyId/events".',
                             textAlign: TextAlign.center,
                           ),
                         )
@@ -379,22 +558,26 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
                             final q = _searchCtrl.text.trim().toLowerCase();
                             final filtered = docs.where((d) {
                               final data = d.data();
-                              // búsqueda
+
+                              // Búsqueda rápida con soporte dot-path
                               bool matches = q.isEmpty ||
                                   d.id.toLowerCase().contains(q) ||
-                                  (cfg?.quickSearchIn.any((f) =>
-                                          (data[f]?.toString().toLowerCase() ?? '')
-                                              .contains(q)) ??
+                                  (cfg?.quickSearchIn.any((f) {
+                                        final val = _readPath(data, f);
+                                        return val != null &&
+                                            val.toString().toLowerCase().contains(q);
+                                      }) ??
                                       false);
-                              // filtros específicos users
+
+                              // Filtros específicos users
                               if (_selectedPath == 'users') {
                                 if (_roleFilter != 'Todos' &&
                                     (data['role']?.toString() ?? '') != _roleFilter) {
                                   matches = false;
                                 }
-                                if (_activoFilter != null &&
-                                    (data['activo'] is bool) &&
-                                    data['activo'] != _activoFilter) {
+                                if (_isActiveFilter != null &&
+                                    (data['isActive'] is bool) &&
+                                    data['isActive'] != _isActiveFilter) {
                                   matches = false;
                                 }
                               }
@@ -417,6 +600,160 @@ class _AdminDatabaseScreenState extends State<AdminDatabaseScreen> {
         ],
       ),
     );
+  }
+
+  /// Crea SEMILLA de datos conforme a tu modelo (companies, users, events, etc.)
+  Future<void> _crearDatosDemo() async {
+    final db = FirebaseFirestore.instance;
+
+    // ---------- COMPANIES ----------
+    final companies = db.collection('companies');
+    final companyRef = companies.doc(kDemoCompanyId);
+    if (!(await companyRef.get()).exists) {
+      await companyRef.set({
+        'name': 'Catering Gourmet S.L.',
+        'contactEmail': 'contacto@cateringgourmet.es',
+        'phoneNumber': '+34 600 123 456',
+        'address': {
+          'street': 'C/ Mayor 12',
+          'city': 'Madrid',
+          'postalCode': '28001',
+          'country': 'ES',
+        },
+        'logoUrl': null,
+      });
+    }
+
+    // ---------- USERS (GLOBAL) ----------
+    final users = db.collection('users');
+    if (!(await users.doc(kDemoUserAdminId).get()).exists) {
+      await users.doc(kDemoUserAdminId).set({
+        'companyId': kDemoCompanyId,
+        'role': 'admin',
+        'email': 'admin@empresa.com',
+        'phoneNumber': '+34 600 000 000',
+        'name': {'firstName': 'Antonio', 'lastName': 'Admin'},
+        'dateOfBirth': null,
+        'address': {
+          'street': 'C/ Empresa 1',
+          'city': 'Madrid',
+          'postalCode': '28001',
+          'country': 'ES',
+        },
+        'employmentDetails': {
+          'position': 'Administrador',
+          'experienceLevel': 'Senior',
+          'hasDriverLicense': false,
+          'employeeType': 'Fijo',
+        },
+        'preferredContactMethod': 'app_push',
+        'fcmToken': null,
+        'isActive': true,
+      });
+    }
+
+    if (!(await users.doc(kDemoUserWorkerId).get()).exists) {
+      await users.doc(kDemoUserWorkerId).set({
+        'companyId': kDemoCompanyId,
+        'role': 'staff',
+        'email': 'laura@empresa.com',
+        'phoneNumber': '+34 611 111 111',
+        'name': {'firstName': 'Laura', 'lastName': 'García'},
+        'dateOfBirth': Timestamp.fromDate(DateTime(1998, 5, 12)),
+        'employmentDetails': {
+          'position': 'Camarera',
+          'experienceLevel': 'Junior',
+          'hasDriverLicense': true,
+          'employeeType': 'Temporal',
+        },
+        'preferredContactMethod': 'app_push',
+        'isActive': true,
+      });
+
+      // Subcolección de disponibilidad de ejemplo
+      await users
+          .doc(kDemoUserWorkerId)
+          .collection('availabilityExceptions')
+          .add({
+        'startDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 3))),
+        'endDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 5))),
+        'reason': 'Examen',
+      });
+    }
+
+    // ---------- EVENTS (SUBCOL DE COMPANY) ----------
+    final eventsCol = companyRef.collection('events');
+    final eventRef = eventsCol.doc(kDemoEventId);
+    if (!(await eventRef.get()).exists) {
+      await eventRef.set({
+        'name': 'Boda Sánchez-Pérez',
+        'description': 'Banquete para 150 invitados',
+        'location': {
+          'name': 'Finca El Jardín',
+          'address': {
+            'street': 'Camino Viejo s/n',
+            'city': 'Aranjuez',
+            'postalCode': '28300',
+            'country': 'ES',
+          },
+          'geoPoint': const GeoPoint(40.033, -3.607),
+        },
+        'startDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
+        'endDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7, hours: 6))),
+        'status': 'planning',
+        'requiredRoles': {'camarero': 8, 'cocinero': 4},
+        'adminNotes': 'Menú sin gluten para mesa 5',
+        'creatorId': kDemoUserAdminId,
+      });
+
+      // ---------- STAFF ASSIGNMENTS ----------
+      await eventRef.collection('staffAssignments').add({
+        'staffId': kDemoUserWorkerId,
+        'assignedRole': 'Camarera de sala',
+        'offerStatus': 'pending',
+        'adminConfirmation': false,
+        'paymentStatus': 'unpaid',
+        'offerSentTimestamp': FieldValue.serverTimestamp(),
+        'responseTimestamp': null,
+        'confirmedByAdminTimestamp': null,
+      });
+    }
+
+    // ---------- NOTIFICATIONS ----------
+    final notifRef = companyRef.collection('notifications').doc(kDemoNotificationId);
+    if (!(await notifRef.get()).exists) {
+      await notifRef.set({
+        'type': 'event_offer',
+        'message': 'Oferta para el evento Boda Sánchez-Pérez',
+        'relatedEventId': kDemoEventId,
+        'senderId': kDemoUserAdminId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'targetStaffIds': [kDemoUserWorkerId],
+      });
+
+      await notifRef.collection('individualStatuses').doc(kDemoUserWorkerId).set({
+        'status': 'sent',
+        'response': null,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // ---------- CHATS ----------
+    final chatRef = companyRef.collection('chats').doc(kDemoChatId);
+    if (!(await chatRef.get()).exists) {
+      await chatRef.set({
+        'type': 'event_chat',
+        'participants': [kDemoUserAdminId, kDemoUserWorkerId],
+        'relatedEventId': kDemoEventId,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      await chatRef.collection('messages').add({
+        'senderId': kDemoUserAdminId,
+        'content': 'Laura, recuerda estar a las 16:30.',
+        'timestamp': FieldValue.serverTimestamp(),
+        'readBy': [kDemoUserAdminId],
+      });
+    }
   }
 }
 
@@ -535,59 +872,46 @@ class _CollectionTableState extends State<_CollectionTable> {
       );
     }
 
-    return DataTable(
-      headingRowHeight: 44,
-      dataRowMinHeight: 40,
-      dataRowMaxHeight: 60,
-      columnSpacing: 24,
-      showCheckboxColumn: false,
-      headingTextStyle: Theme.of(context).textTheme.titleSmall,
-      dividerThickness: 0.5,
-      headingRowColor: MaterialStatePropertyAll(
-        Theme.of(context).colorScheme.surfaceContainerHighest,
-      ),
-      columns: [
-        ...columns.map(
-          (c) => DataColumn(
-            label: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-          ),
-        ),
-        const DataColumn(label: SizedBox(width: 140, child: Text('Acciones'))),
-      ],
-      rows: docs.map((d) {
+    DataRow _safeRow(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+      try {
         final data = d.data();
         final cells = <DataCell>[];
 
         for (final c in columns) {
-          // Booleano como chip (como antes)
-          if (c.isBoolean && (data[c.field] is bool)) {
-            cells.add(DataCell(_BoolChip(value: data[c.field] as bool)));
+          // Booleano
+          final rawForBoolean = _readPath(data, c.field);
+          if (c.isBoolean && (rawForBoolean is bool)) {
+            cells.add(DataCell(_BoolChip(value: rawForBoolean)));
             continue;
           }
 
           String? display;
-          final v = data[c.field];
-          if (c.isTimestamp && v is Timestamp) {
-            display = _fmtTs(v);
-          } else if (c.compute != null) {
-            display = c.compute!(data);
-          } else if (c.field == '_id') {
-            display = d.id;
-          } else if (c.field == '_count') {
-            display = '${data.length}';
-          } else {
-            display = v?.toString();
+          try {
+            final v = c.compute != null ? c.compute!(data) : null;
+            if (v != null) {
+              display = v;
+            } else {
+              final raw = _readPath(data, c.field);
+              if (c.isTimestamp && raw is Timestamp) {
+                display = _fmtTs(raw);
+              } else if (c.field == '_id') {
+                display = d.id;
+              } else if (c.field == '_count') {
+                display = '${data.length}';
+              } else {
+                display = raw?.toString();
+              }
+            }
+          } catch (_) {
+            display = '-';
           }
 
           cells.add(
             DataCell(
               ConstrainedBox(
                 constraints: BoxConstraints(
-                  minWidth: _minColWidth(c), // suma ancho real por columna
-                  maxWidth: _maxColWidth(c),
+                  minWidth: c.shrink ? 200.0 : 320.0,
+                  maxWidth: c.shrink ? 260.0 : 380.0,
                 ),
                 child: Text(display ?? '-', overflow: TextOverflow.ellipsis),
               ),
@@ -595,7 +919,7 @@ class _CollectionTableState extends State<_CollectionTable> {
           );
         }
 
-        // Columna de acciones
+        // Acciones
         cells.add(
           DataCell(
             SizedBox(
@@ -623,7 +947,41 @@ class _CollectionTableState extends State<_CollectionTable> {
           cells: cells,
           onSelectChanged: (_) => widget.onEdit(d.id, data),
         );
-      }).toList(),
+      } catch (e) {
+        // Fila de fallback si algo raro en data rompe el render
+        return DataRow(
+          cells: [
+            DataCell(Text('Error en fila ${d.id}: $e')),
+            for (int i = 0; i < columns.length - 1; i++) const DataCell(Text('-')),
+            const DataCell(SizedBox.shrink()),
+          ],
+        );
+      }
+    }
+
+    return DataTable(
+      headingRowHeight: 44,
+      dataRowMinHeight: 40,
+      dataRowMaxHeight: 60,
+      columnSpacing: 24,
+      showCheckboxColumn: false,
+      headingTextStyle: Theme.of(context).textTheme.titleSmall,
+      dividerThickness: 0.5,
+      headingRowColor: MaterialStatePropertyAll(
+        Theme.of(context).colorScheme.surfaceVariant,
+      ),
+      columns: [
+        ...columns.map(
+          (c) => DataColumn(
+            label: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(c.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ),
+        const DataColumn(label: SizedBox(width: 140, child: Text('Acciones'))),
+      ],
+      rows: docs.map(_safeRow).toList(),
     );
   }
 }
@@ -717,6 +1075,7 @@ String _fmtTs(Timestamp ts) {
 }
 
 /// ------------------------- FORMULARIO USERS (crear/editar) -------------------------
+/// Mantiene la UI, pero guarda los campos con TU esquema.
 class _UserFormDialog extends StatefulWidget {
   final String title;
   final Map<String, dynamic>? initialData;
@@ -729,43 +1088,40 @@ class _UserFormDialog extends StatefulWidget {
 class _UserFormDialogState extends State<_UserFormDialog> {
   final _formKey = GlobalKey<FormState>();
 
-  // Campos
+  // Campos UI
   final _nombre = TextEditingController();
   final _apellidos = TextEditingController();
   final _email = TextEditingController();
   final _telefono = TextEditingController();
-  final _dni = TextEditingController();
   final _localidad = TextEditingController();
   final _puesto = TextEditingController();
 
-  String _rol = 'worker'; // admin | worker | user
-  bool _activo = true;
-  bool _vehiculo = false;
-  bool _carnetConducir = false;
-  int _experiencia = 0;
-  DateTime _alta = DateTime.now();
+  String _rol = 'staff'; // admin | staff
+  bool _isActive = true;
+  bool _hasDriverLicense = false;
+  String _experienceLevel = 'Junior'; // Junior | Senior
+  String _employeeType = 'Temporal';  // Fijo | Temporal
+  String _preferredContactMethod = 'app_push'; // app_push | email | sms
 
   @override
   void initState() {
     super.initState();
     final d = widget.initialData ?? {};
-    _nombre.text = (d['nombre'] ?? '').toString();
-    _apellidos.text = (d['apellidos'] ?? '').toString();
+    _nombre.text = _readPath(d, 'name.firstName')?.toString() ?? '';
+    _apellidos.text = _readPath(d, 'name.lastName')?.toString() ?? '';
     _email.text = (d['email'] ?? '').toString();
-    _telefono.text = (d['telefono'] ?? '').toString();
-    _dni.text = (d['dni'] ?? '').toString();
-    _localidad.text = (d['localidad'] ?? '').toString();
-    _puesto.text = (d['puesto'] ?? '').toString();
+    _telefono.text = (d['phoneNumber'] ?? '').toString();
+    _localidad.text = _readPath(d, 'address.city')?.toString() ?? '';
+    _puesto.text = _readPath(d, 'employmentDetails.position')?.toString() ?? '';
 
     _rol = (d['role'] ?? _rol).toString();
-    _activo = d['activo'] is bool ? d['activo'] as bool : _activo;
-    _vehiculo = d['vehiculo'] is bool ? d['vehiculo'] as bool : _vehiculo;
-    _carnetConducir =
-        d['carnetConducir'] is bool ? d['carnetConducir'] as bool : _carnetConducir;
-    _experiencia = d['experiencia'] is num ? (d['experiencia'] as num).toInt() : _experiencia;
-
-    final ts = d['createdAt'];
-    if (ts is Timestamp) _alta = ts.toDate();
+    _isActive = d['isActive'] is bool ? d['isActive'] as bool : _isActive;
+    _hasDriverLicense = _readPath(d, 'employmentDetails.hasDriverLicense') is bool
+        ? _readPath(d, 'employmentDetails.hasDriverLicense') as bool
+        : _hasDriverLicense;
+    _experienceLevel = _readPath(d, 'employmentDetails.experienceLevel')?.toString() ?? _experienceLevel;
+    _employeeType = (d['employeeType'] ?? _employeeType).toString();
+    _preferredContactMethod = (d['preferredContactMethod'] ?? _preferredContactMethod).toString();
   }
 
   @override
@@ -774,7 +1130,6 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     _apellidos.dispose();
     _email.dispose();
     _telefono.dispose();
-    _dni.dispose();
     _localidad.dispose();
     _puesto.dispose();
     super.dispose();
@@ -796,49 +1151,30 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     return null;
   }
 
-  String? _dniVal(String? v) {
-    if (_req(v) != null) return 'Obligatorio';
-    final rx = RegExp(r'^[0-9]{7,8}[A-Za-z]?$'); // validación simple
-    if (!rx.hasMatch(v!.trim())) return 'DNI inválido';
-    return null;
-  }
-
-  Future<void> _pickFecha() async {
-    final now = DateTime.now();
-    final d = await showDatePicker(
-      context: context,
-      firstDate: DateTime(now.year - 2),
-      lastDate: DateTime(now.year + 5),
-      initialDate: _alta,
-    );
-    if (d == null) return;
-    final t = await showTimePicker(context: context, initialTime: TimeOfDay.fromDateTime(_alta));
-    if (t == null) return;
-    setState(() => _alta = DateTime(d.year, d.month, d.day, t.hour, t.minute));
-  }
-
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
 
-    final isEditing = widget.initialData != null;
-    final createdAt = isEditing && widget.initialData!['createdAt'] is Timestamp
-        ? widget.initialData!['createdAt'] as Timestamp
-        : Timestamp.fromDate(_alta);
-
     final data = <String, dynamic>{
-      'nombre': _nombre.text.trim(),
-      'apellidos': _apellidos.text.trim(),
-      'email': _email.text.trim(),
-      'telefono': _telefono.text.trim(),
-      'dni': _dni.text.trim(),
-      'localidad': _localidad.text.trim(),
-      'puesto': _puesto.text.trim(),
+      // —— mapeo a TU esquema ——
+      'companyId': kDemoCompanyId, // ⚠️ demo. En real: cargar del usuario autenticado
       'role': _rol,
-      'activo': _activo,
-      'vehiculo': _vehiculo,
-      'carnetConducir': _carnetConducir,
-      'experiencia': _experiencia,
-      'createdAt': createdAt,
+      'email': _email.text.trim(),
+      'phoneNumber': _telefono.text.trim(),
+      'name': {
+        'firstName': _nombre.text.trim(),
+        'lastName': _apellidos.text.trim(),
+      },
+      'address': {
+        'city': _localidad.text.trim(),
+      },
+      'employmentDetails': {
+        'position': _puesto.text.trim(),
+        'experienceLevel': _experienceLevel,
+        'hasDriverLicense': _hasDriverLicense,
+        'employeeType': _employeeType,
+      },
+      'preferredContactMethod': _preferredContactMethod,
+      'isActive': _isActive,
     };
 
     Navigator.pop(context, data);
@@ -896,22 +1232,12 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                 Row(children: [
                   Expanded(
                     child: TextFormField(
-                      controller: _dni,
-                      decoration: const InputDecoration(labelText: 'DNI *'),
-                      validator: _dniVal,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
                       controller: _localidad,
                       decoration: const InputDecoration(labelText: 'Localidad *'),
                       validator: _req,
                     ),
                   ),
-                ]),
-                const SizedBox(height: 8),
-                Row(children: [
+                  const SizedBox(width: 12),
                   Expanded(
                     child: TextFormField(
                       controller: _puesto,
@@ -919,36 +1245,57 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                       validator: _req,
                     ),
                   ),
-                  const SizedBox(width: 12),
+                ]),
+                const SizedBox(height: 8),
+                Row(children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
                       value: _rol,
                       decoration: const InputDecoration(labelText: 'Rol *'),
                       items: const [
                         DropdownMenuItem(value: 'admin', child: Text('admin')),
-                        DropdownMenuItem(value: 'worker', child: Text('worker')),
-                        DropdownMenuItem(value: 'user', child: Text('user')),
+                        DropdownMenuItem(value: 'staff', child: Text('staff')),
                       ],
-                      onChanged: (v) => setState(() => _rol = v ?? 'worker'),
+                      onChanged: (v) => setState(() => _rol = v ?? 'staff'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _experienceLevel,
+                      decoration: const InputDecoration(labelText: 'Nivel'),
+                      items: const [
+                        DropdownMenuItem(value: 'Junior', child: Text('Junior')),
+                        DropdownMenuItem(value: 'Senior', child: Text('Senior')),
+                      ],
+                      onChanged: (v) => setState(() => _experienceLevel = v ?? 'Junior'),
                     ),
                   ),
                 ]),
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Alta'),
-                      child: Row(
-                        children: [
-                          Text(_fmtTs(Timestamp.fromDate(_alta))),
-                          const Spacer(),
-                          OutlinedButton.icon(
-                            onPressed: _pickFecha,
-                            icon: const Icon(Icons.schedule),
-                            label: const Text('Cambiar'),
-                          )
-                        ],
-                      ),
+                    child: DropdownButtonFormField<String>(
+                      value: _employeeType,
+                      decoration: const InputDecoration(labelText: 'Contrato'),
+                      items: const [
+                        DropdownMenuItem(value: 'Fijo', child: Text('Fijo')),
+                        DropdownMenuItem(value: 'Temporal', child: Text('Temporal')),
+                      ],
+                      onChanged: (v) => setState(() => _employeeType = v ?? 'Temporal'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _preferredContactMethod,
+                      decoration: const InputDecoration(labelText: 'Contacto'),
+                      items: const [
+                        DropdownMenuItem(value: 'app_push', child: Text('app_push')),
+                        DropdownMenuItem(value: 'email', child: Text('email')),
+                        DropdownMenuItem(value: 'sms', child: Text('sms')),
+                      ],
+                      onChanged: (v) => setState(() => _preferredContactMethod = v ?? 'app_push'),
                     ),
                   ),
                 ]),
@@ -957,33 +1304,14 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                   Expanded(
                     child: InputDecorator(
                       decoration: const InputDecoration(labelText: 'Activo'),
-                      child: Switch(value: _activo, onChanged: (v) => setState(() => _activo = v)),
+                      child: Switch(value: _isActive, onChanged: (v) => setState(() => _isActive = v)),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Vehículo'),
-                      child: Switch(value: _vehiculo, onChanged: (v) => setState(() => _vehiculo = v)),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                Row(children: [
                   Expanded(
                     child: InputDecorator(
                       decoration: const InputDecoration(labelText: 'Carnet de conducir'),
-                      child:
-                          Switch(value: _carnetConducir, onChanged: (v) => setState(() => _carnetConducir = v)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: '0',
-                      decoration: const InputDecoration(labelText: 'Años de experiencia'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => _experiencia = int.tryParse(v) ?? 0,
+                      child: Switch(value: _hasDriverLicense, onChanged: (v) => setState(() => _hasDriverLicense = v)),
                     ),
                   ),
                 ]),
@@ -1246,7 +1574,7 @@ class _FieldEditorState extends State<_FieldEditor> {
           decoration: const InputDecoration(labelText: 'Valor (String)'),
           onChanged: (v) => row.stringVal = v,
         );
-      case 'number':
+    case 'number':
         return TextField(
           controller: _numberCtrl,
           decoration: const InputDecoration(labelText: 'Valor (Number)'),
