@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../constants.dart';
 import '../../Login/login_screen.dart';
-import '../../Signup/signup_screen.dart';
+import '../../../../screens/admin/admin_shell_screen.dart';
 
 class LoginAndSignupBtn extends StatelessWidget {
   const LoginAndSignupBtn({
@@ -13,29 +13,33 @@ class LoginAndSignupBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Botón TRABAJADOR
         ElevatedButton(
           onPressed: () {
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) {
+                  // Login de trabajador (auth_ui)
                   return const LoginScreen();
                 },
               ),
             );
           },
           child: Text(
-            "Iniciar Sesión".toUpperCase(),
+            "Soy trabajador".toUpperCase(),
           ),
         ),
         const SizedBox(height: 16),
+        // Botón ADMIN
         ElevatedButton(
           onPressed: () {
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) {
-                  return const SignUpScreen();
+                  // De momento entramos directo al panel admin
+                  return const AdminShellScreen();
                 },
               ),
             );
@@ -45,7 +49,7 @@ class LoginAndSignupBtn extends StatelessWidget {
             elevation: 0,
           ),
           child: Text(
-            "Registrarte".toUpperCase(),
+            "Soy administrador".toUpperCase(),
             style: const TextStyle(color: Colors.black),
           ),
         ),

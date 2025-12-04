@@ -1,269 +1,198 @@
-// lib/screens/admin/admin_shell_screen.dart
-
 import 'package:flutter/material.dart';
 import 'admin_home_screen.dart';
-import 'admin_event_screen.dart';
-import 'admin_notificaciones_screen.dart';
-import 'admin_database_screen.dart';
+import 'admin_events_screen.dart';
 import 'admin_payments_history_screen.dart';
+import 'admin_notificaciones_screen.dart';
+import 'admin_workers_screen.dart';
+
+// OJO: de momento NO importamos admin_database_screen.dart para evitar conflictos
+// import 'admin_database_screen.dart';
 
 class AdminShellScreen extends StatefulWidget {
-  final int initialIndex;
-  const AdminShellScreen({super.key, this.initialIndex = 0});
-  @override State<AdminShellScreen> createState() => _AdminShellScreenState();
+  const AdminShellScreen({super.key});
+
+  @override
+  State<AdminShellScreen> createState() => _AdminShellScreenState();
 }
 
 class _AdminShellScreenState extends State<AdminShellScreen> {
-  late int _index = widget.initialIndex; // ← usamos el valor inicial que venga
+  int _selectedIndex = 0;
 
-  late final List<_TabItem> _tabs = [
-    _TabItem('Usuarios', Icons.people_alt_outlined, () => const AdminHomeScreen()),
-    _TabItem('Eventos', Icons.event_outlined, () => const AdminEventScreen()),
-    _TabItem('Notificaciones', Icons.notifications_active_outlined, () => const AdminNotificacionesScreen()),
-    _TabItem('Base de datos', Icons.storage_outlined, () => const AdminDatabaseScreen()),
-    _TabItem('Pagos', Icons.receipt_long_outlined, () => const AdminPaymentsHistoryScreen()),
-  ];
+  // Páginas del menú lateral
+  // NO ponemos "const [ ... ]" porque algunas pantallas pueden no tener constructor const
+  final List<Widget> _pages = [
+  const AdminHomeScreen(),                 // 0 – Dashboard
+  const AdminEventsScreen(),          // 1 – Eventos
+  const AdminNotificacionesScreen(), // 3 – Notificaciones
+  const AdminPaymentsHistoryScreen(),// 4 – Pagos
+  const AdminDatabaseScreen(),       // 5 – Empresas (puede seguir siendo placeholder)
+];
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, c) {
-      final isWide = c.maxWidth >= 900;
-
-      final titleStyle = Theme.of(context).textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.4,
-          );
-
-      final shellHeader = _ShellHeader(
-        title: 'Administrador — ${_tabs[_index].label}',
-        onSearch: (q) {
-          // TODO: propaga búsqueda a la pestaña activa si lo deseas
-        },
-      );
-
-      final content = IndexedStack(
-  index: _index,
-  children: _tabs
-      .map((t) => _KeepAlive(
-            child: _SectionFrame(child: t.builder), // ✅ sin paréntesis
-          ))
-      .toList(),
-);
-
-
-      if (isWide) {
-        // —— DESKTOP / TABLET (Sidebar elegante)
-        return Scaffold(
-          backgroundColor: Theme.of(context).colorScheme.background,
-          appBar: PreferredSize(
-            preferredSize: const Size.fromHeight(64),
-            child: AppBar(
-              elevation: 0,
-              title: Text('Turneo', style: titleStyle),
-              actions: const [_UserAvatarButton()],
+    return Scaffold(
+      body: Row(
+        children: [
+          _buildSideMenu(context),
+          Expanded(
+            child: Container(
+              color: const Color(0xFFF5F6FA),
+              child: _pages[_selectedIndex],
             ),
           ),
-          body: Row(
-            children: [
-              const SizedBox(width: 16),
-              _Sidebar(
-                index: _index,
-                onTap: (i) => setState(() => _index = i),
-                items: _tabs,
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(
-                child: Column(
-                  children: [
-                    shellHeader,
-                    const SizedBox(height: 8),
-                    Expanded(child: content),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-            ],
-          ),
-        );
-      }
+        ],
+      ),
+    );
+  }
 
-      // —— MÓVIL (Bottom bar limpio)
-      return Scaffold(
-        appBar: AppBar(
-          title: Text('Administrador — ${_tabs[_index].label}', style: titleStyle),
-          actions: const [_UserAvatarButton()],
-        ),
-        body: Column(
+  Widget _buildSideMenu(BuildContext context) {
+    return Container(
+      width: 220,
+      color: Colors.white,
+      child: SafeArea(
+        child: Column(
           children: [
-            shellHeader,
-            const SizedBox(height: 8),
-            Expanded(child: content),
+            const SizedBox(height: 24),
+            // Logo / nombre app
+            Text(
+              'EventStaff Admin',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 32),
+
+            // Opciones de menú
+            _SideMenuItem(
+              icon: Icons.dashboard_outlined,
+              label: 'Dashboard',
+              isSelected: _selectedIndex == 0,
+              onTap: () => _onItemTap(0),
+            ),
+            _SideMenuItem(
+              icon: Icons.event_outlined,
+              label: 'Eventos',
+              isSelected: _selectedIndex == 1,
+              onTap: () => _onItemTap(1),
+            ),
+            _SideMenuItem(
+              icon: Icons.group_outlined,
+              label: 'Trabajadores',
+              isSelected: _selectedIndex == 2,
+              onTap: () => _onItemTap(2),
+            ),
+            _SideMenuItem(
+              icon: Icons.notifications_outlined,
+              label: 'Notificaciones',
+              isSelected: _selectedIndex == 3,
+              onTap: () => _onItemTap(3),
+            ),
+            _SideMenuItem(
+              icon: Icons.payments_outlined,
+              label: 'Pagos',
+              isSelected: _selectedIndex == 4,
+              onTap: () => _onItemTap(4),
+            ),
+            _SideMenuItem(
+              icon: Icons.business_outlined,
+              label: 'Empresas',
+              isSelected: _selectedIndex == 5,
+              onTap: () => _onItemTap(5),
+            ),
+
+            const Spacer(),
+            const Divider(),
+            ListTile(
+              leading: const CircleAvatar(
+                radius: 16,
+                child: Text('AC'),
+              ),
+              title: const Text('Admin Carlos'),
+              subtitle: const Text('admin@eventstaff.com'),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                // TODO: lógica de logout
+              },
+              icon: const Icon(Icons.logout, size: 18),
+              label: const Text('Cerrar sesión'),
+            ),
+            const SizedBox(height: 16),
           ],
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() => _index = i),
-          destinations: _tabs
-              .map((t) => NavigationDestination(icon: Icon(t.icon), label: t.label))
-              .toList(),
-        ),
-      );
+      ),
+    );
+  }
+
+  void _onItemTap(int index) {
+    setState(() {
+      _selectedIndex = index;
     });
   }
 }
 
-class _TabItem {
+class _SideMenuItem extends StatelessWidget {
+  final IconData icon;
   final String label;
-  final IconData icon;
-  final Widget Function() builder;
-  _TabItem(this.label, this.icon, this.builder);
-}
+  final bool isSelected;
+  final VoidCallback onTap;
 
-class _Sidebar extends StatelessWidget {
-  final int index;
-  final void Function(int) onTap;
-  final List<_TabItem> items;
-  const _Sidebar({required this.index, required this.onTap, required this.items});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: 240,
-      margin: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outline.withOpacity(0.08)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 6))],
-      ),
-      child: NavigationRail(
-        selectedIndex: index,
-        onDestinationSelected: onTap,
-        labelType: NavigationRailLabelType.all,
-        useIndicator: true,
-        groupAlignment: -1.0,
-        destinations: [
-          for (final t in items)
-            NavigationRailDestination(
-              icon: _SidebarIcon(icon: t.icon),
-              selectedIcon: _SidebarIcon(icon: t.icon, selected: true),
-              label: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(t.label, style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SidebarIcon extends StatelessWidget {
-  final IconData icon;
-  final bool selected;
-  const _SidebarIcon({required this.icon, this.selected = false});
+  const _SideMenuItem({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: selected ? cs.primary.withOpacity(0.18) : cs.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outline.withOpacity(0.06)),
-      ),
-      child: Icon(icon, size: 20, color: selected ? cs.primary : cs.onSurface.withOpacity(0.9)),
-    );
-  }
-}
+    final bgColor = isSelected ? const Color(0xFF111827) : Colors.transparent;
+    final textColor = isSelected ? Colors.white : const Color(0xFF4B5563);
 
-class _ShellHeader extends StatelessWidget {
-  final String title;
-  final void Function(String query)? onSearch;
-  const _ShellHeader({required this.title, this.onSearch});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          colors: [cs.primary.withOpacity(0.10), cs.surface],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: cs.outline.withOpacity(0.06)),
-      ),
-      child: Row(
-        children: [
-          Text(title, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-          const Spacer(),
-          SizedBox(
-            width: 280,
-            child: TextField(
-              onSubmitted: (v) => onSearch?.call(v),
-              decoration: const InputDecoration(
-                hintText: 'Buscar…',
-                prefixIcon: Icon(Icons.search),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SectionFrame extends StatelessWidget {
-  final Widget Function() child;
-  const _SectionFrame({required this.child});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: DecoratedBox(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: Theme.of(context).cardColor,
+            color: bgColor,
+            borderRadius: BorderRadius.circular(10),
           ),
-          child: child(),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: textColor),
+              const SizedBox(width: 12),
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _UserAvatarButton extends StatelessWidget {
-  const _UserAvatarButton();
+// ───────────────────────── Placeholders para que compile ─────────────────────
+
+
+// Empresas / Base de datos
+class AdminDatabaseScreen extends StatelessWidget {
+  const AdminDatabaseScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: 'Mi cuenta',
-      onPressed: () {/* TODO: abrir perfil/ajustes */},
-      icon: const CircleAvatar(
-        radius: 14,
-        child: Icon(Icons.person, size: 16),
+    return const Center(
+      child: Text(
+        'Pantalla de Empresas / Base de datos (pendiente de implementar)',
+        style: TextStyle(fontSize: 18),
       ),
     );
   }
-}
-
-class _KeepAlive extends StatefulWidget {
-  final Widget child;
-  const _KeepAlive({super.key, required this.child});
-  @override
-  State<_KeepAlive> createState() => _KeepAliveState();
-}
-class _KeepAliveState extends State<_KeepAlive> with AutomaticKeepAliveClientMixin {
-  @override
-  Widget build(BuildContext context) { super.build(context); return widget.child; }
-  @override
-  bool get wantKeepAlive => true;
 }

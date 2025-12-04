@@ -169,4 +169,6 @@ static ThemeData vogueGlovoDark = vogueGlovoLight.copyWith(
   ),
 );
 
+  static var lightTheme;
+
 }

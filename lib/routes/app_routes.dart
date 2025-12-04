@@ -17,8 +17,8 @@ import '../screens/common/error_screen.dart';
 // ADMIN
 import '../screens/admin/admin_shell_screen.dart';
 import '../screens/admin/admin_home_screen.dart';
-import '../screens/admin/admin_event_screen.dart';
-import '../screens/admin/admin_database_screen.dart';
+import '../screens/admin/admin_events_screen.dart';
+import '../screens/admin/admin_database_screen.dart' hide AdminEventScreen;
 import '../screens/admin/admin_import_screen.dart';
 import '../screens/admin/admin_payments_history_screen.dart';
 import '../screens/admin/admin_notificaciones_screen.dart';
@@ -91,6 +91,6 @@ class Routes {
 
     // WORKER
     workerHome: (_) => const WorkerHomeScreen(),
-    workerEvents: (_) => const WorkerEventScreen(),
+    workerEvents: (_) => const WorkerEventsScreen(),
   };
 }
