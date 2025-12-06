@@ -22,7 +22,8 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   // NO ponemos "const [ ... ]" porque algunas pantallas pueden no tener constructor const
   final List<Widget> _pages = [
   const AdminHomeScreen(),                 // 0 – Dashboard
-  const AdminEventsScreen(),          // 1 – Eventos
+  const AdminEventsScreen(),
+  const AdminWorkersScreen(),          // 1 – Eventos
   const AdminNotificacionesScreen(), // 3 – Notificaciones
   const AdminPaymentsHistoryScreen(),// 4 – Pagos
   const AdminDatabaseScreen(),       // 5 – Empresas (puede seguir siendo placeholder)

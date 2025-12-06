@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:table_calendar/table_calendar.dart';
 
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 
-const _roleOptions = <String>[
-  'Camareros',
-  'Cocineros',
-  'Logística',
-  'Limpiadores',
-  'Metres',
-  'Coordinadores',
-];
-
-class AdminEventScreen extends StatelessWidget {
+class AdminEventScreen extends StatefulWidget {
   const AdminEventScreen({super.key});
+
+  @override
+  State<AdminEventScreen> createState() => _AdminEventScreenState();
+}
+
+class _AdminEventScreenState extends State<AdminEventScreen> {
+  DateTime _focusedDay = DateTime.now();
+  DateTime _selectedDay = DateTime.now();
+
+  List<Evento> _eventsForDay(DateTime day, List<Evento> all) {
+    return all
+        .where((e) => isSameDay(e.fechaInicio, day))
+        .toList()
+      ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,153 +65,287 @@ class AdminEventScreen extends StatelessWidget {
             );
           }
 
-          final eventos = snapshot.data ?? [];
+          final eventos = (snapshot.data ?? [])
+            ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
 
-          if (eventos.isEmpty) {
-            return const Center(
-              child: Text(
-                'Todavía no hay eventos.\nPulsa en "Nuevo evento" para crear el primero.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Color(0xFF6B7280),
+          final eventosDelDia = _eventsForDay(_selectedDay, eventos);
+
+          return Column(
+            children: [
+              // ====== CALENDARIO ======
+              Container(
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: TableCalendar<Evento>(
+                  firstDay: DateTime.utc(2020, 1, 1),
+                  lastDay: DateTime.utc(2100, 12, 31),
+                  focusedDay: _focusedDay,
+                  locale: 'es_ES',
+                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                  startingDayOfWeek: StartingDayOfWeek.monday,
+                  calendarFormat: CalendarFormat.month,
+                  eventLoader: (day) => _eventsForDay(day, eventos),
+                  headerStyle: const HeaderStyle(
+                    formatButtonVisible: false,
+                    titleCentered: true,
+                    titleTextStyle: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    leftChevronIcon: Icon(Icons.chevron_left),
+                    rightChevronIcon: Icon(Icons.chevron_right),
+                  ),
+                  calendarStyle: CalendarStyle(
+                    todayDecoration: BoxDecoration(
+                      color: const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    selectedDecoration: BoxDecoration(
+                      color: const Color(0xFF6366F1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    selectedTextStyle: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    todayTextStyle: const TextStyle(
+                      color: Color(0xFF111827),
+                      fontWeight: FontWeight.w600,
+                    ),
+                    markersAlignment: Alignment.bottomCenter,
+                    markerDecoration: BoxDecoration(
+                      color: const Color(0xFF6366F1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    markersMaxCount: 3,
+                  ),
+                  onDaySelected: (selected, focused) {
+                    setState(() {
+                      _selectedDay = selected;
+                      _focusedDay = focused;
+                    });
+                  },
+                  onPageChanged: (focused) {
+                    _focusedDay = focused;
+                  },
                 ),
               ),
-            );
-          }
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
-            itemCount: eventos.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final e = eventos[index];
-
-              final rangoFecha =
-                  '${_formatFechaCorta(e.fechaInicio)} · ${_formatHora(e.fechaInicio)} - ${_formatHora(e.fechaFin)}';
-
-              final ubicacion = [
-                if (e.ciudad.isNotEmpty) e.ciudad,
-                if (e.direccion.isNotEmpty) e.direccion,
-              ].join(' · ');
-
-              final totalRoles =
-                  e.rolesRequeridos.values.fold<int>(0, (s, v) => s + v);
-
-              return Dismissible(
-                key: ValueKey(e.id),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade600,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.delete, color: Colors.white),
+              // ====== CABECERA LISTA DÍA ======
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Row(
+                  children: [
+                    Text(
+                      'Eventos del ${_formatFechaCorta(_selectedDay)}',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE5E7EB),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${eventosDelDia.length}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF4B5563),
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (eventos.isNotEmpty)
+                      Text(
+                        '${eventos.length} eventos en total',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                  ],
                 ),
-                confirmDismiss: (_) async {
-                  final confirmed = await showDialog<bool>(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Eliminar evento'),
-                      content: Text(
-                        '¿Seguro que quieres eliminar el evento "${e.nombre}"?',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, false),
-                          child: const Text('Cancelar'),
-                        ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.red,
+              ),
+
+              const SizedBox(height: 4),
+
+              // ====== LISTA DE EVENTOS DEL DÍA ======
+              Expanded(
+                child: eventosDelDia.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No hay eventos para este día.\nPulsa en "Nuevo evento" para crear uno.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Color(0xFF6B7280),
                           ),
-                          child: const Text('Eliminar'),
                         ),
-                      ],
-                    ),
-                  );
-                  if (confirmed == true) {
-                    await FirestoreService.instance.borrarEvento(
-                      empresaId,
-                      e.id,
-                    );
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content:
-                            Text('Evento "${e.nombre}" eliminado correctamente'),
-                      ),
-                    );
-                  }
-                  return confirmed ?? false;
-                },
-                child: InkWell(
-                  onTap: () => _openEventForm(context: context, evento: e),
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                e.nombre,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
+                      )
+                    : ListView.separated(
+                        padding:
+                            const EdgeInsets.fromLTRB(16, 8, 16, 80), // FAB
+                        itemCount: eventosDelDia.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final e = eventosDelDia[index];
+
+                          final rangoFecha =
+                              '${_formatHora(e.fechaInicio)} - ${_formatHora(e.fechaFin)}';
+
+                          final ubicacion = [
+                            if (e.ciudad.isNotEmpty) e.ciudad,
+                            if (e.direccion.isNotEmpty) e.direccion,
+                          ].join(' · ');
+
+                          return Dismissible(
+                            key: ValueKey(e.id),
+                            direction: DismissDirection.endToStart,
+                            background: Container(
+                              alignment: Alignment.centerRight,
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade600,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: const Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                              ),
+                            ),
+                            confirmDismiss: (_) async {
+                              final confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  title: const Text('Eliminar evento'),
+                                  content: Text(
+                                    '¿Seguro que quieres eliminar el evento "${e.nombre}"?',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, false),
+                                      child: const Text('Cancelar'),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(context, true),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.red,
+                                      ),
+                                      child: const Text('Eliminar'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirmed == true) {
+                                await FirestoreService.instance.borrarEvento(
+                                  empresaId,
+                                  e.id,
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Evento "${e.nombre}" eliminado correctamente',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                              return confirmed ?? false;
+                            },
+                            child: InkWell(
+                              onTap: () =>
+                                  _openEventForm(context: context, evento: e),
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(14),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.04),
+                                      blurRadius: 6,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            e.nombre,
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _EstadoChip(estado: e.estado),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      rangoFecha,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: Color(0xFF4B5563),
+                                      ),
+                                    ),
+                                    if (ubicacion.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        ubicacion,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          color: Color(0xFF6B7280),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 4),
+                                    if (e.tipo.isNotEmpty)
+                                      Text(
+                                        e.tipo,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF9CA3AF),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            _EstadoChip(estado: e.estado),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          rangoFecha,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF4B5563),
-                          ),
-                        ),
-                        if (ubicacion.isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            ubicacion,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              color: Color(0xFF6B7280),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 4),
-                        Text(
-                          'Trabajadores necesarios: $totalRoles',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF9CA3AF),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+                          );
+                        },
+                      ),
+              ),
+            ],
           );
         },
       ),
@@ -212,22 +353,15 @@ class AdminEventScreen extends StatelessWidget {
   }
 }
 
-// ==========================
-// FORMULARIO CREAR / EDITAR
-// ==========================
-
-class _RolCantidad {
-  String rol;
-  int cantidad;
-
-  _RolCantidad({required this.rol, required this.cantidad});
-}
+//
+// =============== FORMULARIO CREAR / EDITAR ===============
+//
 
 Future<void> _openEventForm({
   required BuildContext context,
   Evento? evento,
 }) async {
-  final empresaId = AppConfig.empresaId;
+  const empresaId = AppConfig.empresaId;
   final isEditing = evento != null;
 
   final nombreController = TextEditingController(text: evento?.nombre ?? '');
@@ -235,25 +369,20 @@ Future<void> _openEventForm({
   final ciudadController = TextEditingController(text: evento?.ciudad ?? '');
   final direccionController =
       TextEditingController(text: evento?.direccion ?? '');
+  final cantidadController = TextEditingController(
+    text: (evento?.cantidadRequeridaTrabajadores ?? 0) > 0
+        ? evento!.cantidadRequeridaTrabajadores.toString()
+        : '',
+  );
+  final rolesController = TextEditingController(
+    text: _rolesToText(evento?.rolesRequeridos),
+  );
 
   DateTime inicio =
       evento?.fechaInicio ?? DateTime.now().add(const Duration(days: 1));
   DateTime fin = evento?.fechaFin ?? inicio.add(const Duration(hours: 4));
-  String estado = _normalizeEstado(evento?.estado);
 
-  // Roles iniciales desde el evento (mapa {rol: cantidad})
-  List<_RolCantidad> roles = [];
-  final rolesMap = evento?.rolesRequeridos ?? {};
-  if (rolesMap.isNotEmpty) {
-    roles = rolesMap.entries
-        .map((e) => _RolCantidad(rol: e.key, cantidad: e.value))
-        .toList();
-  } else {
-    // si no hay, empezamos con una fila por defecto
-    roles = [
-      _RolCantidad(rol: _roleOptions.first, cantidad: 1),
-    ];
-  }
+  String estado = _normalizeEstado(evento?.estado);
 
   await showModalBottomSheet(
     context: context,
@@ -296,9 +425,6 @@ Future<void> _openEventForm({
                 });
               }
             }
-
-            final totalTrabajadores =
-                roles.fold<int>(0, (sum, r) => sum + (r.cantidad));
 
             return SingleChildScrollView(
               child: Column(
@@ -375,67 +501,23 @@ Future<void> _openEventForm({
                       border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // ======== ROLES REQUERIDOS =========
-                  const Text(
-                    'Roles requeridos',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: cantidadController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Número de trabajadores necesarios',
+                      border: OutlineInputBorder(),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Column(
-                    children: [
-                      for (int i = 0; i < roles.length; i++)
-                        _RolRow(
-                          rolCantidad: roles[i],
-                          onRolChanged: (newRol) {
-                            setState(() {
-                              roles[i].rol = newRol;
-                            });
-                          },
-                          onCantidadChanged: (newCantidad) {
-                            setState(() {
-                              roles[i].cantidad =
-                                  newCantidad < 0 ? 0 : newCantidad;
-                            });
-                          },
-                          onRemove: roles.length == 1
-                              ? null
-                              : () {
-                                  setState(() {
-                                    roles.removeAt(i);
-                                  });
-                                },
-                        ),
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: () {
-                          setState(() {
-                            roles.add(
-                              _RolCantidad(
-                                rol: _roleOptions.first,
-                                cantidad: 1,
-                              ),
-                            );
-                          });
-                        },
-                        icon: const Icon(Icons.add),
-                        label: const Text('Añadir rol'),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Total trabajadores necesarios: $totalTrabajadores',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: rolesController,
+                    decoration: const InputDecoration(
+                      labelText: 'Roles requeridos (separados por comas)',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-
                   const SizedBox(height: 16),
 
                   const Text(
@@ -499,6 +581,8 @@ Future<void> _openEventForm({
                         final tipo = tipoController.text.trim();
                         final ciudad = ciudadController.text.trim();
                         final direccion = direccionController.text.trim();
+                        final cantidadText = cantidadController.text.trim();
+                        final rolesText = rolesController.text.trim();
 
                         if (nombre.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -511,16 +595,35 @@ Future<void> _openEventForm({
                           return;
                         }
 
-                        // Construimos mapa {rol: cantidad} limpio
+                        final cantidad = int.tryParse(cantidadText) ?? 0;
+
+                        // ====== CONVERTIMOS TEXTO A MAP<String, int> ======
+                        final List<String> rolesList = rolesText.isEmpty
+                            ? <String>[]
+                            : rolesText
+                                .split(',')
+                                .map((r) => r.trim())
+                                .where((r) => r.isNotEmpty)
+                                .toList();
+
                         final Map<String, int> rolesMap = {};
-                        for (final r in roles) {
-                          if (r.rol.isEmpty || r.cantidad <= 0) continue;
-                          rolesMap[r.rol] =
-                              (rolesMap[r.rol] ?? 0) + r.cantidad;
+
+                        // Si ya había roles en el evento, intentamos reaprovechar cantidades
+                        if (evento?.rolesRequeridos is Map) {
+                          final prev = evento!.rolesRequeridos as Map;
+                          for (final entry in prev.entries) {
+                            final key = entry.key.toString();
+                            final value = entry.value;
+                            if (rolesList.contains(key) && value is int) {
+                              rolesMap[key] = value;
+                            }
+                          }
                         }
 
-                        final totalTrabajadores =
-                            rolesMap.values.fold<int>(0, (s, v) => s + v);
+                        // Para cualquier rol nuevo que no estuviera antes, ponemos 0 por defecto
+                        for (final r in rolesList) {
+                          rolesMap[r] = rolesMap[r] ?? 0;
+                        }
 
                         final nuevo = Evento(
                           id: evento?.id ?? '',
@@ -530,7 +633,7 @@ Future<void> _openEventForm({
                           fechaFin: fin,
                           estado: estado,
                           rolesRequeridos: rolesMap,
-                          cantidadRequeridaTrabajadores: totalTrabajadores,
+                          cantidadRequeridaTrabajadores: cantidad,
                           ciudad: ciudad,
                           direccion: direccion,
                           creadoPor: evento?.creadoPor ?? 'admin',
@@ -550,25 +653,28 @@ Future<void> _openEventForm({
                             );
                           }
 
-                          Navigator.of(context).pop();
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                isEditing
-                                    ? 'Evento actualizado'
-                                    : 'Evento creado',
+                          if (context.mounted) {
+                            Navigator.of(context).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  isEditing
+                                      ? 'Evento actualizado'
+                                      : 'Evento creado',
+                                ),
                               ),
-                            ),
-                          );
+                            );
+                          }
                         } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Error al guardar el evento: $e',
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Error al guardar el evento: $e',
+                                ),
                               ),
-                            ),
-                          );
+                            );
+                          }
                         }
                       },
                       style: ElevatedButton.styleFrom(
@@ -595,9 +701,9 @@ Future<void> _openEventForm({
   );
 }
 
-// ==========================
-// HELPERS / WIDGETS
-// ==========================
+//
+// =================== HELPERS / WIDGETS ===================
+//
 
 String _normalizeEstado(String? raw) {
   const valid = ['activo', 'borrador', 'cancelado', 'finalizado'];
@@ -605,77 +711,6 @@ String _normalizeEstado(String? raw) {
   final lower = raw.toLowerCase();
   if (valid.contains(lower)) return lower;
   return 'activo';
-}
-
-class _RolRow extends StatelessWidget {
-  final _RolCantidad rolCantidad;
-  final ValueChanged<String> onRolChanged;
-  final ValueChanged<int> onCantidadChanged;
-  final VoidCallback? onRemove;
-
-  const _RolRow({
-    required this.rolCantidad,
-    required this.onRolChanged,
-    required this.onCantidadChanged,
-    this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: _roleOptions.contains(rolCantidad.rol)
-                  ? rolCantidad.rol
-                  : _roleOptions.first,
-              items: _roleOptions
-                  .map(
-                    (r) => DropdownMenuItem(
-                      value: r,
-                      child: Text(r),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) onRolChanged(value);
-              },
-              decoration: const InputDecoration(
-                labelText: 'Rol',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 80,
-            child: TextFormField(
-              initialValue: rolCantidad.cantidad.toString(),
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Nº',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (value) {
-                final c = int.tryParse(value) ?? 0;
-                onCantidadChanged(c);
-              },
-            ),
-          ),
-          if (onRemove != null) ...[
-            const SizedBox(width: 4),
-            IconButton(
-              onPressed: onRemove,
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Quitar rol',
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
 class _FechaHoraField extends StatelessWidget {
@@ -762,6 +797,21 @@ String _formatFechaCorta(DateTime d) {
   final mes = d.month.toString().padLeft(2, '0');
   final year = d.year.toString();
   return '$dia/$mes/$year';
+}
+
+String _rolesToText(Object? rawRoles) {
+  // Si en Firestore es una LISTA ["Montaje", "Seguridad", ...]
+  if (rawRoles is List) {
+    return rawRoles.map((e) => e.toString()).join(', ');
+  }
+
+  // Si en Firestore fuera un MAP { "camarero": 2, "logistica": 3 }
+  if (rawRoles is Map) {
+    return rawRoles.keys.map((e) => e.toString()).join(', ');
+  }
+
+  // Cualquier otro caso
+  return '';
 }
 
 String _formatHora(DateTime d) {
