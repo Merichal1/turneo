@@ -5,6 +5,7 @@ import '../../models/evento.dart';
 import '../../models/trabajador.dart';
 import '../../models/asignacion_evento.dart';
 import '../../models/disponibilidad.dart';
+import '../../models/disponibilidad_evento.dart';
 
 class FirestoreService {
   FirestoreService._();
@@ -131,7 +132,7 @@ class FirestoreService {
     await eventoDoc(empresaId, eventoId).delete();
   }
 
-  // ==========================
+    // ==========================
   // TRABAJADORES
   // ==========================
 
@@ -166,6 +167,20 @@ class FirestoreService {
 
   Future<void> borrarTrabajador(String empresaId, String trabajadorId) async {
     await trabajadorDoc(empresaId, trabajadorId).delete();
+  }
+
+  /// 🔹 NUEVO: obtener el ID de trabajador (documento) a partir del UID de auth
+  Future<String?> getTrabajadorIdPorUid(
+    String empresaId,
+    String authUid,
+  ) async {
+    final snap = await trabajadoresRef(empresaId)
+        .where('authUid', isEqualTo: authUid)
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+    return snap.docs.first.id;
   }
 
   // ==========================
@@ -216,7 +231,7 @@ class FirestoreService {
   }
 
   // ==========================
-  // DISPONIBILIDAD TRABAJADOR
+  // DISPONIBILIDAD TRABAJADOR (CALENDARIO PROPIO)
   // ==========================
 
   Stream<List<Disponibilidad>> listenDisponibilidadTrabajador(
@@ -250,5 +265,126 @@ class FirestoreService {
       },
       SetOptions(merge: true),
     );
+  }
+
+  // ==========================
+  // DISPONIBILIDAD POR EVENTO
+  // ==========================
+
+  /// Escucha las solicitudes de disponibilidad de un evento concreto
+  Stream<List<DisponibilidadEvento>> listenDisponibilidadEvento(
+    String empresaId,
+    String eventoId,
+  ) {
+    return _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('eventos')
+        .doc(eventoId)
+        .collection('disponibilidad')
+        .orderBy('creadoEn', descending: false)
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map(
+                (d) => DisponibilidadEvento.fromFirestore(d),
+              )
+              .toList(),
+        );
+  }
+
+  /// Crea solicitudes de disponibilidad para un evento a varios trabajadores
+  Future<void> crearSolicitudesDisponibilidadParaEvento({
+    required String empresaId,
+    required String eventoId,
+    required List<Trabajador> trabajadores,
+  }) async {
+    final batch = _db.batch();
+    final now = DateTime.now();
+
+    final dispoColl = _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('eventos')
+        .doc(eventoId)
+        .collection('disponibilidad');
+
+    for (final t in trabajadores) {
+      // Un documento por trabajador (eventoId + trabajadorId)
+      final docRef = dispoColl.doc(t.id);
+
+      batch.set(
+        docRef,
+        {
+          'eventoId': eventoId,
+          'trabajadorId': t.id,
+          'trabajadorNombre': '${t.nombre} ${t.apellidos}',
+          'trabajadorRol': t.puesto ?? '',
+          'estado': 'pendiente', // pendiente | aceptado | rechazado
+          'asignado': false,
+          'creadoEn': Timestamp.fromDate(now),
+          'respondidoEn': null,
+        },
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
+  /// Actualiza el estado de una solicitud (aceptado / rechazado / pendiente)
+  Future<void> actualizarEstadoDisponibilidad({
+    required String empresaId,
+    required String eventoId,
+    required String disponibilidadId,
+    required String nuevoEstado, // 'aceptado' | 'rechazado' | 'pendiente'
+  }) async {
+    await _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('eventos')
+        .doc(eventoId)
+        .collection('disponibilidad')
+        .doc(disponibilidadId)
+        .update({
+      'estado': nuevoEstado,
+      'respondidoEn': Timestamp.fromDate(DateTime.now()),
+    });
+  }
+
+  /// Marca a un trabajador como asignado/no asignado a un evento
+  Future<void> marcarTrabajadorAsignado({
+    required String empresaId,
+    required String eventoId,
+    required String disponibilidadId,
+    required bool asignado,
+  }) async {
+    await _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('eventos')
+        .doc(eventoId)
+        .collection('disponibilidad')
+        .doc(disponibilidadId)
+        .update({
+      'asignado': asignado,
+    });
+  }
+
+  /// 🔍 Todas las solicitudes de disponibilidad (de todos los eventos)
+  /// para un trabajador concreto (usado en la app del trabajador)
+  Stream<List<DisponibilidadEvento>> listenSolicitudesDisponibilidadTrabajador(
+    String trabajadorId,
+  ) {
+    return _db
+        .collectionGroup('disponibilidad')
+        .where('trabajadorId', isEqualTo: trabajadorId)
+        .orderBy('creadoEn', descending: true)
+        .snapshots()
+        .map(
+          (snap) => snap.docs
+              .map((d) => DisponibilidadEvento.fromFirestore(d))
+              .toList(),
+        );
   }
 }

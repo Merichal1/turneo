@@ -23,7 +23,7 @@ dependencies:
   firebase_storage: ^12.2.0
   firebase_crashlytics: ^4.1.0
   image_picker: ^1.0.7
-  intl: ^0.19.0
+  intl: ^0.19.0        # 👈 esta versión es la que necesitamos
   url_launcher: ^6.1.2
   google_sign_in: ^7.2.0
   file_picker: ^10.3.3
@@ -44,6 +44,5 @@ flutter:
     - res/github.png
     - res/medium.png
     - res/quickcoder.png
-    - res/firebase_compendium_logo.png
     - assets/icons/
     - assets/images/

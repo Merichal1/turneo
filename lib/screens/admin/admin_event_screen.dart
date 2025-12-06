@@ -4,6 +4,7 @@ import 'package:table_calendar/table_calendar.dart';
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
+import 'admin_assignment_screen.dart';
 
 class AdminEventScreen extends StatefulWidget {
   const AdminEventScreen({super.key});
@@ -106,27 +107,27 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                     leftChevronIcon: Icon(Icons.chevron_left),
                     rightChevronIcon: Icon(Icons.chevron_right),
                   ),
-                  calendarStyle: CalendarStyle(
+                  calendarStyle: const CalendarStyle(
                     todayDecoration: BoxDecoration(
-                      color: const Color(0xFFEEF2FF),
-                      borderRadius: BorderRadius.circular(999),
+                      color: Color(0xFFEEF2FF),
+                      shape: BoxShape.circle,
                     ),
                     selectedDecoration: BoxDecoration(
-                      color: const Color(0xFF6366F1),
-                      borderRadius: BorderRadius.circular(999),
+                      color: Color(0xFF6366F1),
+                      shape: BoxShape.circle,
                     ),
-                    selectedTextStyle: const TextStyle(
+                    selectedTextStyle: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                     ),
-                    todayTextStyle: const TextStyle(
+                    todayTextStyle: TextStyle(
                       color: Color(0xFF111827),
                       fontWeight: FontWeight.w600,
                     ),
                     markersAlignment: Alignment.bottomCenter,
                     markerDecoration: BoxDecoration(
-                      color: const Color(0xFF6366F1),
-                      borderRadius: BorderRadius.circular(999),
+                      color: Color(0xFF6366F1),
+                      shape: BoxShape.circle,
                     ),
                     markersMaxCount: 3,
                   ),
@@ -142,7 +143,7 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                 ),
               ),
 
-              // ====== CABECERA LISTA DÍA ======
+              // ====== CABECERA LISTA DIA ======
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -228,10 +229,8 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                                 color: Colors.red.shade600,
                                 borderRadius: BorderRadius.circular(14),
                               ),
-                              child: const Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                              ),
+                              child: const Icon(Icons.delete,
+                                  color: Colors.white),
                             ),
                             confirmDismiss: (_) async {
                               final confirmed = await showDialog<bool>(
@@ -293,7 +292,8 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                                   ],
                                 ),
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
@@ -306,7 +306,24 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                                             ),
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          tooltip: 'Asignar personal',
+                                          onPressed: () {
+                                            Navigator.of(context).push(
+                                              MaterialPageRoute(
+                                                builder: (_) =>
+                                                    AdminAssignmentScreen(
+                                                  initialEvento: e,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          icon: const Icon(
+                                            Icons.group_add_outlined,
+                                            size: 20,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
                                         _EstadoChip(estado: e.estado),
                                       ],
                                     ),
@@ -597,32 +614,15 @@ Future<void> _openEventForm({
 
                         final cantidad = int.tryParse(cantidadText) ?? 0;
 
-                        // ====== CONVERTIMOS TEXTO A MAP<String, int> ======
-                        final List<String> rolesList = rolesText.isEmpty
-                            ? <String>[]
-                            : rolesText
-                                .split(',')
-                                .map((r) => r.trim())
-                                .where((r) => r.isNotEmpty)
-                                .toList();
-
+                        // 🔹 Convertimos el texto a Map<String, int>
+                        // "camareros, logistica" -> { "camareros": 1, "logistica": 1 }
                         final Map<String, int> rolesMap = {};
-
-                        // Si ya había roles en el evento, intentamos reaprovechar cantidades
-                        if (evento?.rolesRequeridos is Map) {
-                          final prev = evento!.rolesRequeridos as Map;
-                          for (final entry in prev.entries) {
-                            final key = entry.key.toString();
-                            final value = entry.value;
-                            if (rolesList.contains(key) && value is int) {
-                              rolesMap[key] = value;
-                            }
+                        if (rolesText.isNotEmpty) {
+                          for (final part in rolesText.split(',')) {
+                            final clean = part.trim();
+                            if (clean.isEmpty) continue;
+                            rolesMap[clean] = 1;
                           }
-                        }
-
-                        // Para cualquier rol nuevo que no estuviera antes, ponemos 0 por defecto
-                        for (final r in rolesList) {
-                          rolesMap[r] = rolesMap[r] ?? 0;
                         }
 
                         final nuevo = Evento(
@@ -805,7 +805,7 @@ String _rolesToText(Object? rawRoles) {
     return rawRoles.map((e) => e.toString()).join(', ');
   }
 
-  // Si en Firestore fuera un MAP { "camarero": 2, "logistica": 3 }
+  // Si en Firestore es un MAP { "camarero": 2, "logistica": 3 }
   if (rawRoles is Map) {
     return rawRoles.keys.map((e) => e.toString()).join(', ');
   }

@@ -1,427 +1,308 @@
-// TODO Implement this library.
 import 'package:flutter/material.dart';
 
-class WorkerNotificationsScreen extends StatefulWidget {
+import '../../config/app_config.dart';
+import '../../core/services/firestore_service.dart';
+import '../../models/disponibilidad_evento.dart';
+
+class WorkerNotificationsScreen extends StatelessWidget {
   const WorkerNotificationsScreen({super.key});
 
   @override
-  State<WorkerNotificationsScreen> createState() =>
-      _WorkerNotificationsScreenState();
-}
-
-class _WorkerNotificationsScreenState
-    extends State<WorkerNotificationsScreen> {
-  String _selectedFilter = 'Todas';
-
-  final List<NotificationItem> _notifications = [
-    NotificationItem(
-      id: '1',
-      title: 'Nueva solicitud de evento',
-      body: 'La empresa Eventos Premium te ha enviado una solicitud para '
-          'la Boda García-Martínez el 16 noviembre.',
-      timeLabel: 'Hace 2 h',
-      type: NotificationType.request,
-      unread: true,
-    ),
-    NotificationItem(
-      id: '2',
-      title: 'Recordatorio de evento',
-      body: 'Recuerda que mañana tienes la Cena corporativa Tech Summit '
-          'a las 20:00.',
-      timeLabel: 'Hace 6 h',
-      type: NotificationType.reminder,
-      unread: true,
-    ),
-    NotificationItem(
-      id: '3',
-      title: 'Mensaje nuevo del coordinador',
-      body: 'Carlos (coordinador) ha escrito en el chat del evento '
-          '“Boda García-Martínez”.',
-      timeLabel: 'Ayer',
-      type: NotificationType.chat,
-      unread: false,
-    ),
-    NotificationItem(
-      id: '4',
-      title: 'Actualización de estado de pago',
-      body: 'Se ha actualizado el estado de pago de tu evento '
-          '“Cóctel inauguración Galería Arte”: Pagado.',
-      timeLabel: 'Ayer',
-      type: NotificationType.system,
-      unread: false,
-    ),
-    NotificationItem(
-      id: '5',
-      title: 'Turno añadido a tu calendario',
-      body: 'Se ha añadido el evento “Conferencia Tech” el 25 noviembre '
-          'a tu calendario.',
-      timeLabel: 'Hace 3 días',
-      type: NotificationType.system,
-      unread: false,
-    ),
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    final filtered = _notifications.where((n) {
-      if (_selectedFilter == 'Todas') return true;
-      if (_selectedFilter == 'Solicitudes' &&
-          n.type == NotificationType.request) return true;
-      if (_selectedFilter == 'Recordatorios' &&
-          n.type == NotificationType.reminder) return true;
-      if (_selectedFilter == 'Sistema' &&
-          n.type == NotificationType.system) return true;
-      if (_selectedFilter == 'Chat' &&
-          n.type == NotificationType.chat) return true;
-      return false;
-    }).toList();
+    const empresaId = AppConfig.empresaId;
 
-    final int unreadCount = _notifications.where((n) => n.unread).length;
+    // ⚠️ Mientras no tenemos auth, usa aquí un ID real de trabajador
+    const trabajadorIdDemo = 'soeX8CRQY9RFWrBFtmai';
 
-    return SafeArea(
-      child: Scaffold(
-        backgroundColor: const Color(0xFFF3F4F6),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // AppBar “manual”
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.notifications_none, size: 24),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Notificaciones',
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (unreadCount > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111827),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '$unreadCount nuevas',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            // Filtros
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _FilterChip(
-                      label: 'Todas',
-                      selected: _selectedFilter == 'Todas',
-                      onTap: () => _setFilter('Todas'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Solicitudes',
-                      selected: _selectedFilter == 'Solicitudes',
-                      onTap: () => _setFilter('Solicitudes'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Recordatorios',
-                      selected: _selectedFilter == 'Recordatorios',
-                      onTap: () => _setFilter('Recordatorios'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Sistema',
-                      selected: _selectedFilter == 'Sistema',
-                      onTap: () => _setFilter('Sistema'),
-                    ),
-                    const SizedBox(width: 8),
-                    _FilterChip(
-                      label: 'Chat',
-                      selected: _selectedFilter == 'Chat',
-                      onTap: () => _setFilter('Chat'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 12),
-
-            // Lista de notificaciones
-            Expanded(
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const Divider(
-                    height: 16,
-                    thickness: 0.6,
-                    indent: 48, // para que no corte el icono
-                  ),
-                  itemBuilder: (context, index) {
-                    final n = filtered[index];
-                    return _NotificationTile(
-                      item: n,
-                      onTap: () => _markAsRead(n),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _setFilter(String v) {
-    setState(() {
-      _selectedFilter = v;
-    });
-  }
-
-  void _markAsRead(NotificationItem n) {
-    if (!n.unread) return;
-    setState(() {
-      final idx = _notifications.indexWhere((x) => x.id == n.id);
-      if (idx != -1) {
-        _notifications[idx] =
-            _notifications[idx].copyWith(unread: false);
-      }
-    });
-  }
-}
-
-// ──────────────────────────────── MODELO ────────────────────────────────
-
-enum NotificationType {
-  request,
-  reminder,
-  system,
-  chat,
-}
-
-class NotificationItem {
-  final String id;
-  final String title;
-  final String body;
-  final String timeLabel;
-  final NotificationType type;
-  final bool unread;
-
-  NotificationItem({
-    required this.id,
-    required this.title,
-    required this.body,
-    required this.timeLabel,
-    required this.type,
-    required this.unread,
-  });
-
-  NotificationItem copyWith({bool? unread}) {
-    return NotificationItem(
-      id: id,
-      title: title,
-      body: body,
-      timeLabel: timeLabel,
-      type: type,
-      unread: unread ?? this.unread,
-    );
-  }
-}
-
-// ──────────────────────────────── WIDGETS UI ───────────────────────────────
-
-class _FilterChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = selected ? const Color(0xFF111827) : Colors.white;
-    final fg = selected ? Colors.white : const Color(0xFF111827);
-    final border =
-        selected ? Colors.transparent : const Color(0xFFE5E7EB);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: border),
-        ),
-        child: Text(
-          label,
+    return Scaffold(
+      backgroundColor: const Color(0xFFF3F4F6),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0.5,
+        title: const Text(
+          'Notificaciones',
           style: TextStyle(
-            color: fg,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
+            color: Color(0xFF111827),
+            fontWeight: FontWeight.w600,
           ),
+        ),
+        centerTitle: false,
+      ),
+      body: StreamBuilder<List<DisponibilidadEvento>>(
+        stream: FirestoreService.instance
+            .listenSolicitudesDisponibilidadTrabajador(trabajadorIdDemo),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Error al cargar notificaciones:\n${snapshot.error}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.red),
+              ),
+            );
+          }
+
+          final solicitudes = snapshot.data ?? [];
+
+          if (solicitudes.isEmpty) {
+            return const Center(
+              child: Text(
+                'No tienes notificaciones por ahora.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            );
+          }
+
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
+            itemCount: solicitudes.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final s = solicitudes[index];
+
+              final fechaTexto = _formatFechaHora(s.creadoEn);
+
+              return Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ===== Cabecera: icono + título + fecha + chip estado
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.event_available,
+                          size: 20,
+                          color: Color(0xFF6366F1),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Solicitud de disponibilidad',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF111827),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                fechaTexto,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF6B7280),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                s.trabajadorRol.isNotEmpty
+                                    ? 'Rol: ${s.trabajadorRol}'
+                                    : 'Rol: No especificado',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF4B5563),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Evento ID: ${s.eventoId}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF9CA3AF),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _EstadoChip(estado: s.estado),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    const Text(
+                      'El administrador te pide que confirmes si estás disponible para este evento.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF4B5563),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // ===== Botones Aceptar / Rechazar
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: s.estado == 'rechazado'
+                                ? null
+                                : () async {
+                                    await _cambiarEstado(
+                                      context: context,
+                                      empresaId: empresaId,
+                                      solicitud: s,
+                                      nuevoEstado: 'rechazado',
+                                    );
+                                  },
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Color(0xFFDC2626)),
+                            ),
+                            child: const Text(
+                              'Rechazar',
+                              style: TextStyle(color: Color(0xFFDC2626)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: s.estado == 'aceptado'
+                                ? null
+                                : () async {
+                                    await _cambiarEstado(
+                                      context: context,
+                                      empresaId: empresaId,
+                                      solicitud: s,
+                                      nuevoEstado: 'aceptado',
+                                    );
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF4F46E5),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Aceptar'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _cambiarEstado({
+    required BuildContext context,
+    required String empresaId,
+    required DisponibilidadEvento solicitud,
+    required String nuevoEstado,
+  }) async {
+    try {
+      await FirestoreService.instance.actualizarEstadoDisponibilidad(
+        empresaId: empresaId,
+        eventoId: solicitud.eventoId,
+        disponibilidadId: solicitud.id,
+        nuevoEstado: nuevoEstado,
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              nuevoEstado == 'aceptado'
+                  ? 'Has aceptado la solicitud.'
+                  : 'Has rechazado la solicitud.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al actualizar: $e'),
+          ),
+        );
+      }
+    }
+  }
+}
+
+/// Chip para mostrar el estado de la solicitud
+class _EstadoChip extends StatelessWidget {
+  final String estado;
+
+  const _EstadoChip({required this.estado});
+
+  @override
+  Widget build(BuildContext context) {
+    final e = estado.toLowerCase();
+    Color bg;
+    Color fg;
+    String label;
+
+    switch (e) {
+      case 'aceptado':
+        bg = const Color(0xFFDCFCE7);
+        fg = const Color(0xFF166534);
+        label = 'Aceptado';
+        break;
+      case 'rechazado':
+        bg = const Color(0xFFFEF2F2);
+        fg = const Color(0xFFB91C1C);
+        label = 'Rechazado';
+        break;
+      default:
+        bg = const Color(0xFFFEF3C7);
+        fg = const Color(0xFF92400E);
+        label = 'Pendiente';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: fg,
         ),
       ),
     );
   }
 }
 
-class _NotificationTile extends StatelessWidget {
-  final NotificationItem item;
-  final VoidCallback onTap;
+String _pad2(int v) => v.toString().padLeft(2, '0');
 
-  const _NotificationTile({
-    required this.item,
-    required this.onTap,
-  });
-
-  IconData _iconForType(NotificationType t) {
-    switch (t) {
-      case NotificationType.request:
-        return Icons.assignment_turned_in_outlined;
-      case NotificationType.reminder:
-        return Icons.schedule_outlined;
-      case NotificationType.system:
-        return Icons.info_outline;
-      case NotificationType.chat:
-        return Icons.chat_bubble_outline;
-    }
-  }
-
-  Color _iconColor(NotificationType t) {
-    switch (t) {
-      case NotificationType.request:
-        return const Color(0xFF2563EB);
-      case NotificationType.reminder:
-        return const Color(0xFFF97316);
-      case NotificationType.system:
-        return const Color(0xFF10B981);
-      case NotificationType.chat:
-        return const Color(0xFF7C3AED);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final icon = _iconForType(item.type);
-    final iconColor = _iconColor(item.type);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Icono
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              icon,
-              size: 22,
-              color: iconColor,
-            ),
-          ),
-          const SizedBox(width: 12),
-
-          // Texto
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: item.unread
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      item.timeLabel,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Color(0xFF9CA3AF),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  item.body,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF6B7280),
-                  ),
-                ),
-                if (item.unread) ...[
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF111827),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Text(
-                        'Nuevo',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF111827),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+String _formatFechaHora(DateTime dt) {
+  return '${_pad2(dt.day)}/${_pad2(dt.month)}/${dt.year} · '
+      '${_pad2(dt.hour)}:${_pad2(dt.minute)}';
 }
-

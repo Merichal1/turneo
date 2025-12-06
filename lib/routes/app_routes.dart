@@ -1,10 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-// AUTH ORIGINAL
-import '../screens/auth/login_screen.dart';
-import '../screens/auth/register_screen.dart';
-import '../screens/auth/change_password_screen.dart';
-
 // AUTH NUEVA (ZIP)
 import '../auth_ui/Screens/Welcome/welcome_screen.dart' as zip;
 import '../auth_ui/Screens/Login/login_screen.dart' as zip;
@@ -70,11 +65,6 @@ class Routes {
     splash: (_) => const SplashScreen(),
     error: (_) => const ErrorScreen(),
 
-    // AUTH ORIGINAL
-    login: (_) => const LoginScreen(),
-    register: (_) => const RegisterScreen(),
-    changePassword: (_) => const ChangePasswordScreen(),
-
     // AUTH NUEVA (ZIP)
     welcome: (_) => const zip.WelcomeScreen(),
     loginZip: (_) => const zip.LoginScreen(),
@@ -83,7 +73,7 @@ class Routes {
     // ADMIN
     adminShell: (_) => const AdminShellScreen(),
     adminHome: (_) => const AdminHomeScreen(),
-    adminEvents: (_) => const AdminEventScreen(),
+    adminEvents: (_) => const AdminEventsScreen(),
     adminDatabase: (_) => const AdminDatabaseScreen(),
     adminImport: (_) => const AdminImportScreen(),
     adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),

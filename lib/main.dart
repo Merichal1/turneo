@@ -5,6 +5,7 @@ import 'package:intl/date_symbol_data_local.dart'; // 👈 IMPORTANTE
 import 'config/firebase_options.dart';
 import 'auth_ui/Screens/Welcome/welcome_screen.dart';
 
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 

@@ -5,6 +5,7 @@ import 'worker_notifications_screen.dart';
 import 'worker_history_screen.dart';
 import 'worker_chat_screen.dart';
 import 'worker_profile_screen.dart';
+import 'worker_availability_requests_screen.dart'; // 👈 NUEVO
 
 class WorkerHomeScreen extends StatefulWidget {
   const WorkerHomeScreen({super.key});
@@ -16,20 +17,36 @@ class WorkerHomeScreen extends StatefulWidget {
 class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   int _currentIndex = 0;
 
-  // OJO: sin "const" en la lista para evitar errores
+  // Páginas del bottom nav
   final List<Widget> _pages = [
-   const WorkerEventsScreen(),          // 0 – Eventos
-   const WorkerAvailabilityScreen(),    // 1 – Disponibilidad
-   const WorkerNotificationsScreen(),   // 2 – Notificaciones
-    WorkerHistoryScreen(),         // 3 – Historial
-    WorkerChatScreen(),            // 4 – Chat
-    WorkerProfileScreen(),         // 5 – Perfil
+    const WorkerEventsScreen(),          // 0 – Eventos
+    const WorkerAvailabilityScreen(),    // 1 – Disponibilidad general
+    const WorkerNotificationsScreen(),   // 2 – Notificaciones
+    WorkerHistoryScreen(),               // 3 – Historial
+    WorkerChatScreen(),                  // 4 – Chat
+    WorkerProfileScreen(),               // 5 – Perfil
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(child: _pages[_currentIndex]),
+
+      // 👇 FAB solo en la pestaña de Disponibilidad (index 1)
+      floatingActionButton: _currentIndex == 1
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const WorkerAvailabilityRequestsScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.event_available_outlined),
+              label: const Text('Mis solicitudes'),
+            )
+          : null,
+
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentIndex,
