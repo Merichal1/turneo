@@ -6,6 +6,7 @@ import '../../models/trabajador.dart';
 import '../../models/asignacion_evento.dart';
 import '../../models/disponibilidad.dart';
 import '../../models/disponibilidad_evento.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class FirestoreService {
   FirestoreService._();
@@ -386,5 +387,67 @@ class FirestoreService {
               .map((d) => DisponibilidadEvento.fromFirestore(d))
               .toList(),
         );
+  }
+    /// Busca una empresa por su código de licencia
+  Future<String?> buscarEmpresaPorCodigoLicencia(String codigo) async {
+    final snap = await _db
+        .collection('empresas')
+        .where('codigoLicencia', isEqualTo: codigo)
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+    return snap.docs.first.id; // empresaId
+  }
+
+  /// Crea automáticamente el trabajador dentro de la empresa
+  Future<void> crearTrabajadorDesdeRegistro({
+    required String codigoLicencia,
+    required User user, // usuario de FirebaseAuth
+    required String nombre,
+    required String apellidos,
+    required String ciudad,
+    required String telefono,
+    String? puesto,
+    int? aniosExperiencia,
+    bool tieneVehiculo = false,
+  }) async {
+    // 1) Buscar empresa por código
+    final empresaId = await buscarEmpresaPorCodigoLicencia(codigoLicencia);
+    if (empresaId == null) {
+      throw Exception('Código de empresa no válido');
+    }
+
+    final ahora = DateTime.now();
+
+    // 2) Crear documento en empresas/{empresaId}/trabajadores/{uid}
+    await _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('trabajadores')
+        .doc(user.uid) // usamos el UID como id de trabajador
+        .set({
+      'authUid': user.uid,
+      'empresaId': empresaId,
+      'activo': true,
+      'creadoEn': Timestamp.fromDate(ahora),
+
+      // campos para búsquedas/ordenaciones
+      'ciudad_lower': ciudad.toLowerCase(),
+      'nombre_lower': '${nombre.toLowerCase()} ${apellidos.toLowerCase()}',
+
+      'perfil': {
+        'nombre': nombre,
+        'apellidos': apellidos,
+        'ciudad': ciudad,
+        'correo': user.email,
+        'telefono': telefono,
+      },
+      'laboral': {
+        'puesto': puesto ?? '',
+        'añosExperiencia': aniosExperiencia ?? 0,
+        'tieneVehiculo': tieneVehiculo,
+      },
+    });
   }
 }

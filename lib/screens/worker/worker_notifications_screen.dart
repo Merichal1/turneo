@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
@@ -11,8 +12,18 @@ class WorkerNotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     const empresaId = AppConfig.empresaId;
 
-    // ⚠️ Mientras no tenemos auth, usa aquí un ID real de trabajador
-    const trabajadorIdDemo = 'soeX8CRQY9RFWrBFtmai';
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return const Scaffold(
+        body: Center(
+          child: Text(
+            'Debes iniciar sesión para ver tus notificaciones.',
+          ),
+        ),
+      );
+    }
+
+    final trabajadorId = user.uid;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
@@ -30,7 +41,7 @@ class WorkerNotificationsScreen extends StatelessWidget {
       ),
       body: StreamBuilder<List<DisponibilidadEvento>>(
         stream: FirestoreService.instance
-            .listenSolicitudesDisponibilidadTrabajador(trabajadorIdDemo),
+            .listenSolicitudesDisponibilidadTrabajador(trabajadorId),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting &&
               !snapshot.hasData) {
@@ -67,7 +78,6 @@ class WorkerNotificationsScreen extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
               final s = solicitudes[index];
-
               final fechaTexto = _formatFechaHora(s.creadoEn);
 
               return Container(
@@ -86,7 +96,6 @@ class WorkerNotificationsScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ===== Cabecera: icono + título + fecha + chip estado
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -141,9 +150,7 @@ class WorkerNotificationsScreen extends StatelessWidget {
                         _EstadoChip(estado: s.estado),
                       ],
                     ),
-
                     const SizedBox(height: 12),
-
                     const Text(
                       'El administrador te pide que confirmes si estás disponible para este evento.',
                       style: TextStyle(
@@ -151,10 +158,7 @@ class WorkerNotificationsScreen extends StatelessWidget {
                         color: Color(0xFF4B5563),
                       ),
                     ),
-
                     const SizedBox(height: 12),
-
-                    // ===== Botones Aceptar / Rechazar
                     Row(
                       children: [
                         Expanded(
@@ -251,7 +255,6 @@ class WorkerNotificationsScreen extends StatelessWidget {
   }
 }
 
-/// Chip para mostrar el estado de la solicitud
 class _EstadoChip extends StatelessWidget {
   final String estado;
 
