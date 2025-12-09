@@ -295,43 +295,49 @@ class FirestoreService {
   }
 
   /// Crea solicitudes de disponibilidad para un evento a varios trabajadores
-  Future<void> crearSolicitudesDisponibilidadParaEvento({
-    required String empresaId,
-    required String eventoId,
-    required List<Trabajador> trabajadores,
-  }) async {
-    final batch = _db.batch();
-    final now = DateTime.now();
+// FirestoreService.dart
 
-    final dispoColl = _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('disponibilidad');
+Future<void> crearSolicitudesDisponibilidadParaEvento({
+  required String empresaId,
+  required String eventoId,
+  required List<Trabajador> trabajadores,
+}) async {
+  final batch = _db.batch();
 
-    for (final t in trabajadores) {
-      // Un documento por trabajador (eventoId + trabajadorId)
-      final docRef = dispoColl.doc(t.id);
+  // Mismo timestamp para todo el envío
+  final now = DateTime.now();
 
-      batch.set(
-        docRef,
-        {
-          'eventoId': eventoId,
-          'trabajadorId': t.id,
-          'trabajadorNombre': '${t.nombre} ${t.apellidos}',
-          'trabajadorRol': t.puesto ?? '',
-          'estado': 'pendiente', // pendiente | aceptado | rechazado
-          'asignado': false,
-          'creadoEn': Timestamp.fromDate(now),
-          'respondidoEn': null,
-        },
-        SetOptions(merge: true),
-      );
-    }
+  final dispoColl = _db
+      .collection('empresas')
+      .doc(empresaId)
+      .collection('eventos')
+      .doc(eventoId)
+      .collection('disponibilidad');
 
-    await batch.commit();
+  for (final t in trabajadores) {
+    final docRef = dispoColl.doc(t.id);
+
+    batch.set(
+      docRef,
+      {
+        'eventoId': eventoId,
+        'trabajadorId': t.id,
+        'trabajadorNombre':
+            '${t.nombre ?? ''} ${t.apellidos ?? ''}'.trim(),
+        'trabajadorRol': t.puesto ?? '',
+        // lo usaremos para el email:
+        'trabajadorEmail': t.correo ?? '',
+        'estado': 'pendiente', // pendiente | aceptado | rechazado
+        'asignado': false,
+        'creadoEn': Timestamp.fromDate(now),
+        'respondidoEn': null,
+      },
+      SetOptions(merge: true),
+    );
   }
+
+  await batch.commit();
+}
 
   /// Actualiza el estado de una solicitud (aceptado / rechazado / pendiente)
   Future<void> actualizarEstadoDisponibilidad({
@@ -450,4 +456,5 @@ class FirestoreService {
       },
     });
   }
+
 }

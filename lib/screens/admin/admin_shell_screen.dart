@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
+
 import 'admin_home_screen.dart';
 import 'admin_events_screen.dart';
-import 'admin_payments_history_screen.dart';
-import 'admin_notificaciones_screen.dart';
 import 'admin_workers_screen.dart';
-
-// OJO: de momento NO importamos admin_database_screen.dart para evitar conflictos
-// import 'admin_database_screen.dart';
+import 'admin_notificaciones_screen.dart';
+import 'admin_payments_history_screen.dart';
+import 'admin_chat_screen.dart';
 
 class AdminShellScreen extends StatefulWidget {
   const AdminShellScreen({super.key});
@@ -18,16 +17,16 @@ class AdminShellScreen extends StatefulWidget {
 class _AdminShellScreenState extends State<AdminShellScreen> {
   int _selectedIndex = 0;
 
-  // Páginas del menú lateral
-  // NO ponemos "const [ ... ]" porque algunas pantallas pueden no tener constructor const
+  // Orden EXACTO de las pantallas según el menú
   final List<Widget> _pages = [
-  const AdminHomeScreen(),                 // 0 – Dashboard
-  const AdminEventsScreen(),
-  const AdminWorkersScreen(),          // 1 – Eventos
-  const AdminNotificacionesScreen(), // 3 – Notificaciones
-  const AdminPaymentsHistoryScreen(),// 4 – Pagos
-  const AdminDatabaseScreen(),       // 5 – Empresas (puede seguir siendo placeholder)
-];
+    const AdminHomeScreen(),            // 0 – Dashboard
+    const AdminEventsScreen(),          // 1 – Eventos
+    const AdminWorkersScreen(),         // 2 – Trabajadores
+    const AdminNotificacionesScreen(),  // 3 – Notificaciones
+    const AdminChatScreen(),            // 4 – Chat
+    const AdminPaymentsHistoryScreen(), // 5 – Pagos
+    const AdminDatabaseScreen(),        // 6 – Empresas
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +53,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
         child: Column(
           children: [
             const SizedBox(height: 24),
-            // Logo / nombre app
             Text(
               'EventStaff Admin',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -63,7 +61,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
             ),
             const SizedBox(height: 32),
 
-            // Opciones de menú
             _SideMenuItem(
               icon: Icons.dashboard_outlined,
               label: 'Dashboard',
@@ -89,31 +86,37 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
               onTap: () => _onItemTap(3),
             ),
             _SideMenuItem(
-              icon: Icons.payments_outlined,
-              label: 'Pagos',
+              icon: Icons.chat_bubble_outline,
+              label: 'Chat',
               isSelected: _selectedIndex == 4,
               onTap: () => _onItemTap(4),
             ),
             _SideMenuItem(
-              icon: Icons.business_outlined,
-              label: 'Empresas',
+              icon: Icons.payments_outlined,
+              label: 'Pagos',
               isSelected: _selectedIndex == 5,
               onTap: () => _onItemTap(5),
+            ),
+            _SideMenuItem(
+              icon: Icons.business_outlined,
+              label: 'Empresas',
+              isSelected: _selectedIndex == 6,
+              onTap: () => _onItemTap(6),
             ),
 
             const Spacer(),
             const Divider(),
-            ListTile(
-              leading: const CircleAvatar(
+            const ListTile(
+              leading: CircleAvatar(
                 radius: 16,
-                child: Text('AC'),
+                child: Text('AD'),
               ),
-              title: const Text('Admin Carlos'),
-              subtitle: const Text('admin@eventstaff.com'),
+              title: Text('Administrador'),
+              subtitle: Text('admin@eventstaff.com'),
             ),
             TextButton.icon(
               onPressed: () {
-                // TODO: lógica de logout
+                // TODO: logout
               },
               icon: const Icon(Icons.logout, size: 18),
               label: const Text('Cerrar sesión'),
@@ -180,10 +183,7 @@ class _SideMenuItem extends StatelessWidget {
   }
 }
 
-// ───────────────────────── Placeholders para que compile ─────────────────────
-
-
-// Empresas / Base de datos
+// Placeholder para Empresas
 class AdminDatabaseScreen extends StatelessWidget {
   const AdminDatabaseScreen({super.key});
 

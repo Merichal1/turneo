@@ -87,7 +87,8 @@ class _AdminAssignmentScreenState extends State<AdminAssignmentScreen> {
                 if (_selectedEventoId == null) {
                   _selectedEventoId = eventos.first.id;
                 } else {
-                  final existe = eventos.any((e) => e.id == _selectedEventoId);
+                  final existe =
+                      eventos.any((e) => e.id == _selectedEventoId);
                   if (!existe) {
                     _selectedEventoId = eventos.first.id;
                   }
@@ -139,9 +140,7 @@ class _AdminAssignmentScreenState extends State<AdminAssignmentScreen> {
                       empresaId: empresaId,
                       evento: selectedEvento,
                     ),
-
                     const SizedBox(height: 8),
-
                     // La lista de disponibilidad va en el Expanded de abajo
                   ],
                 );
@@ -183,7 +182,7 @@ class _AdminAssignmentScreenState extends State<AdminAssignmentScreen> {
 
 // ================= SUBWIDGET: Enviar solicitudes =================
 
-class _EnviarSolicitudesSection extends StatelessWidget {
+class _EnviarSolicitudesSection extends StatefulWidget {
   final String empresaId;
   final Evento evento;
 
@@ -193,9 +192,27 @@ class _EnviarSolicitudesSection extends StatelessWidget {
   });
 
   @override
+  State<_EnviarSolicitudesSection> createState() =>
+      _EnviarSolicitudesSectionState();
+}
+
+class _EnviarSolicitudesSectionState extends State<_EnviarSolicitudesSection> {
+  /// true = selección por roles, false = por nombres
+  bool _porRoles = true;
+
+  /// Roles seleccionados (String con el nombre del rol/puesto)
+  final Set<String> _rolesSeleccionados = {};
+
+  /// IDs de trabajadores seleccionados cuando estamos en modo nombres
+  final Set<String> _trabajadoresSeleccionados = {};
+
+  /// Texto de búsqueda por nombre en modo nombres
+  String _busquedaNombre = '';
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Trabajador>>(
-      stream: FirestoreService.instance.listenTrabajadores(empresaId),
+      stream: FirestoreService.instance.listenTrabajadores(widget.empresaId),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
@@ -220,62 +237,149 @@ class _EnviarSolicitudesSection extends StatelessWidget {
           );
         }
 
+        // Lista de roles distintos (usando campo `puesto`)
+        final roles = trabajadores
+            .map((t) => (t.puesto ?? '').trim())
+            .where((r) => r.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+
+        // Cálculo de cuántos trabajadores están seleccionados
+        final int seleccionados = _porRoles
+            ? trabajadores
+                .where((t) =>
+                    (t.puesto != null &&
+                        _rolesSeleccionados.contains(t.puesto)))
+                .length
+            : _trabajadoresSeleccionados.length;
+
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: Text(
-                    'Evento: ${evento.nombre}\n'
-                    'Enviar solicitud de disponibilidad a ${trabajadores.length} trabajadores.',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF374151),
-                    ),
+                Text(
+                  'Evento: ${widget.evento.nombre}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF111827),
                   ),
                 ),
-                const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    try {
-                      await FirestoreService.instance
-                          .crearSolicitudesDisponibilidadParaEvento(
-                        empresaId: empresaId,
-                        eventoId: evento.id,
-                        trabajadores: trabajadores,
-                      );
+                const SizedBox(height: 4),
+                Text(
+                  seleccionados == 0
+                      ? 'Selecciona roles o trabajadores a los que enviar la solicitud.'
+                      : 'Se enviará solicitud a $seleccionados trabajador(es) seleccionados.',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF4B5563),
+                  ),
+                ),
+                const SizedBox(height: 12),
 
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Solicitudes de disponibilidad enviadas',
-                            ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              'Error al enviar solicitudes: $e',
-                            ),
-                          ),
-                        );
-                      }
-                    }
-                  },
-                  icon: const Icon(Icons.send_outlined),
-                  label: const Text('Enviar'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
+                // Selector de modo: por roles / por nombres
+                Row(
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Por roles'),
+                      selected: _porRoles,
+                      onSelected: (value) {
+                        if (value) {
+                          setState(() {
+                            _porRoles = true;
+                          });
+                        }
+                      },
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('Por nombres'),
+                      selected: !_porRoles,
+                      onSelected: (value) {
+                        if (value) {
+                          setState(() {
+                            _porRoles = false;
+                          });
+                        }
+                      },
+                    ),
+                    const Spacer(),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        // Filtrar trabajadores según el modo
+                        final List<Trabajador> destino = _porRoles
+                            ? trabajadores
+                                .where((t) =>
+                                    (t.puesto != null &&
+                                        _rolesSeleccionados.contains(t.puesto)))
+                                .toList()
+                            : trabajadores
+                                .where((t) =>
+                                    _trabajadoresSeleccionados.contains(t.id))
+                                .toList();
+
+                        if (destino.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Selecciona al menos un rol o un trabajador.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        try {
+                          await FirestoreService.instance
+                              .crearSolicitudesDisponibilidadParaEvento(
+                            empresaId: widget.empresaId,
+                            eventoId: widget.evento.id,
+                            trabajadores: destino,
+                          );
+
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Solicitudes de disponibilidad enviadas a ${destino.length} trabajador(es).',
+                                ),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    Text('Problema al enviar solicitudes: $e'),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.send_outlined),
+                      label: const Text('Enviar'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
+
+                const SizedBox(height: 12),
+
+                // Contenido según modo
+                if (_porRoles)
+                  _buildSeleccionPorRoles(roles)
+                else
+                  _buildSeleccionPorNombres(trabajadores),
               ],
             ),
           ),
@@ -283,9 +387,115 @@ class _EnviarSolicitudesSection extends StatelessWidget {
       },
     );
   }
+
+  /// Selección usando roles (FilterChip)
+  Widget _buildSeleccionPorRoles(List<String> roles) {
+    if (roles.isEmpty) {
+      return const Text(
+        'Los trabajadores no tienen un rol asignado. No es posible filtrar por rol.',
+        style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: roles.map((puesto) {
+          final seleccionado = _rolesSeleccionados.contains(puesto);
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilterChip(
+              label: Text(puesto),
+              selected: seleccionado,
+              onSelected: (value) {
+                setState(() {
+                  if (value) {
+                    _rolesSeleccionados.add(puesto);
+                  } else {
+                    _rolesSeleccionados.remove(puesto);
+                  }
+                });
+              },
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  /// Selección usando nombres + buscador
+  Widget _buildSeleccionPorNombres(List<Trabajador> trabajadores) {
+    // Filtro por nombre / apellidos
+    final filtrados = trabajadores.where((t) {
+      final nombre = (t.nombre ?? '').toLowerCase();
+      final apellidos = (t.apellidos ?? '').toLowerCase();
+      final query = _busquedaNombre.toLowerCase().trim();
+
+      if (query.isEmpty) return true;
+      return nombre.contains(query) || apellidos.contains(query);
+    }).toList()
+      ..sort(
+        (a, b) => (a.nombre ?? '').compareTo(b.nombre ?? ''),
+      );
+
+    return SizedBox(
+      height: 260,
+      child: Column(
+        children: [
+          TextField(
+            decoration: const InputDecoration(
+              labelText: 'Buscar por nombre',
+              isDense: true,
+              border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.search, size: 18),
+            ),
+            onChanged: (value) {
+              setState(() => _busquedaNombre = value);
+            },
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: ListView.builder(
+              itemCount: filtrados.length,
+              itemBuilder: (context, index) {
+                final t = filtrados[index];
+                final seleccionado =
+                    _trabajadoresSeleccionados.contains(t.id);
+                final nombre = t.nombre ?? 'Sin nombre';
+                final apellidos = t.apellidos ?? '';
+                final puesto = t.puesto ?? '';
+
+                return CheckboxListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text('$nombre $apellidos'.trim()),
+                  subtitle: puesto.isNotEmpty
+                      ? Text(
+                          puesto,
+                          style: const TextStyle(fontSize: 11),
+                        )
+                      : null,
+                  value: seleccionado,
+                  onChanged: (value) {
+                    setState(() {
+                      if (value == true) {
+                        _trabajadoresSeleccionados.add(t.id);
+                      } else {
+                        _trabajadoresSeleccionados.remove(t.id);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-// ================= SUBWIDGET: Lista de disponibilidad =================
+// ============= LISTA DE DISPONIBILIDAD (AGRUPADA POR FECHA) =============
 
 class _DisponibilidadList extends StatelessWidget {
   final String empresaId;
@@ -309,7 +519,7 @@ class _DisponibilidadList extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final lista = snapshot.data ?? [];
+        final lista = List<DisponibilidadEvento>.from(snapshot.data ?? []);
 
         if (lista.isEmpty) {
           return const Center(
@@ -322,6 +532,21 @@ class _DisponibilidadList extends StatelessWidget {
               ),
             ),
           );
+        }
+
+        // Ordenamos por fecha de creación (más reciente arriba)
+        lista.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
+
+        // Construimos items con cabeceras por día
+        final items = <_DisponibilidadUIItem>[];
+        String lastDate = '';
+        for (final d in lista) {
+          final dateStr = _formatFechaCorta(d.creadoEn);
+          if (dateStr != lastDate) {
+            items.add(_DisponibilidadUIItem.header(dateStr));
+            lastDate = dateStr;
+          }
+          items.add(_DisponibilidadUIItem.item(d));
         }
 
         // Resumen rápido
@@ -380,12 +605,29 @@ class _DisponibilidadList extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: lista.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
+              child: ListView.builder(
+                padding:
+                    const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                itemCount: items.length,
                 itemBuilder: (context, index) {
-                  final d = lista[index];
+                  final item = items[index];
+
+                  // Cabecera de fecha
+                  if (item.header != null) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+                      child: Text(
+                        item.header!,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6B7280),
+                        ),
+                      ),
+                    );
+                  }
+
+                  final d = item.data!;
 
                   return Card(
                     shape: RoundedRectangleBorder(
@@ -440,7 +682,8 @@ class _DisponibilidadList extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          if (d.estado == 'aceptado' && !d.asignado)
+                          if (d.estado == 'aceptado' &&
+                              !d.asignado)
                             ElevatedButton(
                               onPressed: () async {
                                 await FirestoreService.instance
@@ -450,7 +693,6 @@ class _DisponibilidadList extends StatelessWidget {
                                   disponibilidadId: d.id,
                                   asignado: true,
                                 );
-
                                 if (context.mounted) {
                                   ScaffoldMessenger.of(context)
                                       .showSnackBar(
@@ -476,6 +718,20 @@ class _DisponibilidadList extends StatelessWidget {
       },
     );
   }
+}
+
+// Item genérico para la lista agrupada
+class _DisponibilidadUIItem {
+  final String? header;
+  final DisponibilidadEvento? data;
+
+  const _DisponibilidadUIItem._({this.header, this.data});
+
+  factory _DisponibilidadUIItem.header(String text) =>
+      _DisponibilidadUIItem._(header: text);
+
+  factory _DisponibilidadUIItem.item(DisponibilidadEvento d) =>
+      _DisponibilidadUIItem._(data: d);
 }
 
 class _ResumenChip extends StatelessWidget {
@@ -565,7 +821,8 @@ class _EstadoDisponibilidadChip extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+          horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
