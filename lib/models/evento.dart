@@ -7,10 +7,15 @@ class Evento {
   final DateTime fechaInicio;
   final DateTime fechaFin;
   final String estado;
-  final Map<String, int> rolesRequeridos; // {"Camareros": 2, ...}
+  final Map<String, int> rolesRequeridos; // {"Camarero": 2, ...}
   final int cantidadRequeridaTrabajadores;
   final String ciudad;
   final String direccion;
+
+  // ✅ NUEVO (opcionales, para mapa)
+  final double? lat;
+  final double? lng;
+
   final String creadoPor;
   final DateTime? creadoEn;
 
@@ -27,6 +32,8 @@ class Evento {
     required this.direccion,
     required this.creadoPor,
     this.creadoEn,
+    this.lat,
+    this.lng,
   });
 
   factory Evento.fromFirestore(
@@ -41,33 +48,45 @@ class Evento {
     // --- rolesRequeridos: mapa {rol: cantidad} ---
     final rolesDynamic = data['rolesRequeridos'];
     final Map<String, int> roles = {};
-
     if (rolesDynamic is Map) {
       rolesDynamic.forEach((key, value) {
-        if (value is num) {
-          roles[key.toString()] = value.toInt();
-        }
+        if (value is num) roles[key.toString()] = value.toInt();
       });
     }
 
     // --- cantidadRequeridaTrabajadores ---
     final rawCantidad = data['cantidadRequeridaTrabajadores'];
     int cantidad = rawCantidad is num ? rawCantidad.toInt() : 0;
-
-    // Si no viene o es 0, la calculamos con la suma de los roles
     if (cantidad == 0 && roles.isNotEmpty) {
       cantidad = roles.values.fold<int>(0, (sum, v) => sum + v);
     }
 
-    // --- ubicación: acepta Ciudad/Dirección o ciudad/direccion ---
+    // --- ubicación: soporta 'ubicacion' (tu estructura) y también 'location' por compatibilidad ---
     String ciudad = '';
     String direccion = '';
+    double? lat;
+    double? lng;
+
     final ubicacion = data['ubicacion'];
     if (ubicacion is Map) {
       final ciudadRaw = ubicacion['Ciudad'] ?? ubicacion['ciudad'];
       final direccionRaw = ubicacion['Dirección'] ?? ubicacion['direccion'];
       if (ciudadRaw is String) ciudad = ciudadRaw;
       if (direccionRaw is String) direccion = direccionRaw;
+
+      final latRaw = ubicacion['lat'];
+      final lngRaw = ubicacion['lng'];
+      if (latRaw is num) lat = latRaw.toDouble();
+      if (lngRaw is num) lng = lngRaw.toDouble();
+    }
+
+    // compat por si en algún momento guardaste "location"
+    final location = data['location'];
+    if ((lat == null || lng == null) && location is Map) {
+      final latRaw = location['lat'];
+      final lngRaw = location['lng'];
+      if (latRaw is num) lat = latRaw.toDouble();
+      if (lngRaw is num) lng = lngRaw.toDouble();
     }
 
     final estadoRaw = data['estado'] as String? ?? 'activo';
@@ -83,6 +102,8 @@ class Evento {
       cantidadRequeridaTrabajadores: cantidad,
       ciudad: ciudad,
       direccion: direccion,
+      lat: lat,
+      lng: lng,
       creadoPor: data['creadoPor'] as String? ?? '',
       creadoEn: tsCreadoEn?.toDate(),
     );
@@ -102,6 +123,9 @@ class Evento {
       'ubicacion': {
         'Ciudad': ciudad,
         'Dirección': direccion,
+        // ✅ NUEVO
+        'lat': lat,
+        'lng': lng,
       },
       'creadoPor': creadoPor,
       'creadoEn': creadoEn != null ? Timestamp.fromDate(creadoEn!) : null,

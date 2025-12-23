@@ -1,10 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:intl/intl.dart';
 
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 import 'admin_assignment_screen.dart';
+import '../../widgets/place_autocomplete_field.dart';
+
+/// ✅ Pon tu key de Places por dart-define:
+/// flutter run --dart-define=GOOGLE_PLACES_API_KEY=TU_KEY
+const String kPlacesApiKey = String.fromEnvironment('GOOGLE_PLACES_API_KEY');
 
 class AdminEventScreen extends StatefulWidget {
   const AdminEventScreen({super.key});
@@ -16,17 +24,15 @@ class AdminEventScreen extends StatefulWidget {
 class _AdminEventScreenState extends State<AdminEventScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
-
-  List<Evento> _eventsForDay(DateTime day, List<Evento> all) {
-    return all
-        .where((e) => isSameDay(e.fechaInicio, day))
-        .toList()
-      ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
-  }
+  bool _verTodos = false;
 
   @override
   Widget build(BuildContext context) {
     const empresaId = AppConfig.empresaId;
+    final bool isWideScreen = MediaQuery.of(context).size.width > 900;
+
+    final double dynamicRowHeight =
+        isWideScreen ? (MediaQuery.of(context).size.height * 0.11) : 52.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
@@ -34,333 +40,135 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
         backgroundColor: Colors.white,
         elevation: 0.5,
         title: const Text(
-          'Eventos',
-          style: TextStyle(
-            color: Color(0xFF111827),
-            fontWeight: FontWeight.w600,
-          ),
+          'Gestión de Eventos',
+          style: TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.bold),
         ),
-        centerTitle: false,
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Text(
+                  _verTodos ? "Historial" : "Próximos",
+                  style: const TextStyle(color: Colors.grey, fontSize: 13),
+                ),
+                Switch(
+                  value: _verTodos,
+                  activeColor: const Color(0xFF6366F1),
+                  onChanged: (val) => setState(() => _verTodos = val),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _openEventForm(context: context),
-        icon: const Icon(Icons.add),
-        label: const Text('Nuevo evento'),
+        backgroundColor: const Color(0xFF111827),
+        icon: const Icon(Icons.add, color: Colors.white),
+        label: const Text('Nuevo Evento', style: TextStyle(color: Colors.white)),
       ),
       body: StreamBuilder<List<Evento>>(
         stream: FirestoreService.instance.listenEventos(empresaId),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
-          if (snapshot.hasError) {
-            final error = snapshot.error;
-            return Center(
-              child: Text(
-                'Error al cargar eventos:\n${error.runtimeType}\n$error',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
-              ),
-            );
-          }
+          List<Evento> todosLosEventos = snapshot.data!;
+          List<Evento> filtrados = _verTodos
+              ? (List.from(todosLosEventos)
+                ..sort((a, b) => b.fechaInicio.compareTo(a.fechaInicio)))
+              : todosLosEventos
+                  .where((e) => e.fechaInicio.isAfter(DateTime.now().subtract(const Duration(days: 1))))
+                  .toList();
 
-          final eventos = (snapshot.data ?? [])
-            ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
+          final eventosDelDia =
+              filtrados.where((e) => isSameDay(e.fechaInicio, _selectedDay)).toList();
 
-          final eventosDelDia = _eventsForDay(_selectedDay, eventos);
-
-          return Column(
+          return Flex(
+            direction: isWideScreen ? Axis.horizontal : Axis.vertical,
             children: [
-              // ====== CALENDARIO ======
-              Container(
-                margin: const EdgeInsets.all(16),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: TableCalendar<Evento>(
-                  firstDay: DateTime.utc(2020, 1, 1),
-                  lastDay: DateTime.utc(2100, 12, 31),
-                  focusedDay: _focusedDay,
-                  locale: 'es_ES',
-                  selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-                  startingDayOfWeek: StartingDayOfWeek.monday,
-                  calendarFormat: CalendarFormat.month,
-                  eventLoader: (day) => _eventsForDay(day, eventos),
-                  headerStyle: const HeaderStyle(
-                    formatButtonVisible: false,
-                    titleCentered: true,
-                    titleTextStyle: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    leftChevronIcon: Icon(Icons.chevron_left),
-                    rightChevronIcon: Icon(Icons.chevron_right),
-                  ),
-                  calendarStyle: const CalendarStyle(
-                    todayDecoration: BoxDecoration(
-                      color: Color(0xFFEEF2FF),
-                      shape: BoxShape.circle,
-                    ),
-                    selectedDecoration: BoxDecoration(
-                      color: Color(0xFF6366F1),
-                      shape: BoxShape.circle,
-                    ),
-                    selectedTextStyle: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    todayTextStyle: TextStyle(
-                      color: Color(0xFF111827),
-                      fontWeight: FontWeight.w600,
-                    ),
-                    markersAlignment: Alignment.bottomCenter,
-                    markerDecoration: BoxDecoration(
-                      color: Color(0xFF6366F1),
-                      shape: BoxShape.circle,
-                    ),
-                    markersMaxCount: 3,
-                  ),
-                  onDaySelected: (selected, focused) {
-                    setState(() {
-                      _selectedDay = selected;
-                      _focusedDay = focused;
-                    });
-                  },
-                  onPageChanged: (focused) {
-                    _focusedDay = focused;
-                  },
-                ),
-              ),
-
-              // ====== CABECERA LISTA DIA ======
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: Row(
-                  children: [
-                    Text(
-                      'Eventos del ${_formatFechaCorta(_selectedDay)}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF111827),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE5E7EB),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '${eventosDelDia.length}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: Color(0xFF4B5563),
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    if (eventos.isNotEmpty)
-                      Text(
-                        '${eventos.length} eventos en total',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 4),
-
-              // ====== LISTA DE EVENTOS DEL DÍA ======
               Expanded(
-                child: eventosDelDia.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No hay eventos para este día.\nPulsa en "Nuevo evento" para crear uno.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                      )
-                    : ListView.separated(
-                        padding:
-                            const EdgeInsets.fromLTRB(16, 8, 16, 80), // FAB
-                        itemCount: eventosDelDia.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final e = eventosDelDia[index];
-
-                          final rangoFecha =
-                              '${_formatHora(e.fechaInicio)} - ${_formatHora(e.fechaFin)}';
-
-                          final ubicacion = [
-                            if (e.ciudad.isNotEmpty) e.ciudad,
-                            if (e.direccion.isNotEmpty) e.direccion,
-                          ].join(' · ');
-
-                          return Dismissible(
-                            key: ValueKey(e.id),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 20),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade600,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: const Icon(Icons.delete,
-                                  color: Colors.white),
-                            ),
-                            confirmDismiss: (_) async {
-                              final confirmed = await showDialog<bool>(
-                                context: context,
-                                builder: (context) => AlertDialog(
-                                  title: const Text('Eliminar evento'),
-                                  content: Text(
-                                    '¿Seguro que quieres eliminar el evento "${e.nombre}"?',
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, false),
-                                      child: const Text('Cancelar'),
-                                    ),
-                                    TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, true),
-                                      style: TextButton.styleFrom(
-                                        foregroundColor: Colors.red,
-                                      ),
-                                      child: const Text('Eliminar'),
-                                    ),
-                                  ],
-                                ),
-                              );
-                              if (confirmed == true) {
-                                await FirestoreService.instance.borrarEvento(
-                                  empresaId,
-                                  e.id,
-                                );
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Evento "${e.nombre}" eliminado correctamente',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }
-                              return confirmed ?? false;
-                            },
-                            child: InkWell(
-                              onTap: () =>
-                                  _openEventForm(context: context, evento: e),
-                              borderRadius: BorderRadius.circular(14),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(14),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.04),
-                                      blurRadius: 6,
-                                      offset: const Offset(0, 2),
-                                    ),
-                                  ],
-                                ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            e.nombre,
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ),
-                                        IconButton(
-                                          tooltip: 'Asignar personal',
-                                          onPressed: () {
-                                            Navigator.of(context).push(
-                                              MaterialPageRoute(
-                                                builder: (_) =>
-                                                    AdminAssignmentScreen(
-                                                  initialEvento: e,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                          icon: const Icon(
-                                            Icons.group_add_outlined,
-                                            size: 20,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        _EstadoChip(estado: e.estado),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      rangoFecha,
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Color(0xFF4B5563),
-                                      ),
-                                    ),
-                                    if (ubicacion.isNotEmpty) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        ubicacion,
-                                        style: const TextStyle(
-                                          fontSize: 13,
-                                          color: Color(0xFF6B7280),
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 4),
-                                    if (e.tipo.isNotEmpty)
-                                      Text(
-                                        e.tipo,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF9CA3AF),
-                                        ),
-                                      ),
-                                  ],
-                                ),
+                flex: isWideScreen ? 3 : 0,
+                child: Container(
+                  margin: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: TableCalendar(
+                      locale: 'es_ES',
+                      firstDay: DateTime.utc(2020, 1, 1),
+                      lastDay: DateTime.utc(2030, 12, 31),
+                      focusedDay: _focusedDay,
+                      startingDayOfWeek: StartingDayOfWeek.monday,
+                      selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+                      eventLoader: (day) =>
+                          filtrados.where((e) => isSameDay(e.fechaInicio, day)).toList(),
+                      calendarBuilders: CalendarBuilders(
+                        markerBuilder: (context, day, events) {
+                          if (events.isEmpty) return null;
+                          return Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Container(
+                              width: 7,
+                              height: 7,
+                              margin: const EdgeInsets.only(bottom: 6),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF6366F1),
+                                shape: BoxShape.circle,
                               ),
                             ),
                           );
                         },
                       ),
+                      rowHeight: dynamicRowHeight,
+                      daysOfWeekHeight: 50,
+                      onDaySelected: (sel, foc) => setState(() {
+                        _selectedDay = sel;
+                        _focusedDay = foc;
+                      }),
+                      onPageChanged: (focusedDay) => setState(() => _focusedDay = focusedDay),
+                      calendarStyle: const CalendarStyle(
+                        markersMaxCount: 1,
+                        selectedDecoration:
+                            BoxDecoration(color: Color(0xFF6366F1), shape: BoxShape.circle),
+                        todayDecoration:
+                            BoxDecoration(color: Color(0xFFEEF2FF), shape: BoxShape.circle),
+                        defaultTextStyle: TextStyle(fontSize: 18),
+                        weekendTextStyle: TextStyle(fontSize: 18, color: Colors.red),
+                        selectedTextStyle: TextStyle(
+                          fontSize: 18,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        todayTextStyle: TextStyle(
+                          color: Color(0xFF6366F1),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                        cellMargin: EdgeInsets.all(4),
+                      ),
+                      headerStyle: const HeaderStyle(
+                        formatButtonVisible: false,
+                        titleCentered: true,
+                        titleTextStyle: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                        headerPadding: EdgeInsets.symmetric(vertical: 20),
+                      ),
+                      daysOfWeekStyle: const DaysOfWeekStyle(
+                        weekdayStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        weekendStyle:
+                            TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                flex: isWideScreen ? 2 : 1,
+                child: _buildEventSideList(eventosDelDia, filtrados, empresaId),
               ),
             ],
           );
@@ -368,481 +176,429 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
       ),
     );
   }
-}
 
-//
-// =============== FORMULARIO CREAR / EDITAR ===============
-//
+  Widget _buildEventSideList(List<Evento> delDia, List<Evento> filtrados, String empresaId) {
+    final listaAMostrar = _verTodos ? filtrados : delDia;
 
-Future<void> _openEventForm({
-  required BuildContext context,
-  Evento? evento,
-}) async {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 12),
+            child: Text(
+              _verTodos ? "Historial Completo" : "Eventos del ${_formatFechaCorta(_selectedDay)}",
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+          ),
+          Expanded(
+            child: listaAMostrar.isEmpty
+                ? const Center(child: Text("No hay eventos registrados", style: TextStyle(color: Colors.grey)))
+                : ListView.builder(
+                    itemCount: listaAMostrar.length,
+                    itemBuilder: (context, i) {
+                      final e = listaAMostrar[i];
+                      return Dismissible(
+                        key: Key(e.id),
+                        direction: DismissDirection.endToStart,
+                        confirmDismiss: (direction) => _confirmarBorrado(e, empresaId),
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 20),
+                          decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(12)),
+                          child: const Icon(Icons.delete, color: Colors.white),
+                        ),
+                        child: _buildEventCard(e),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmarBorrado(Evento e, String empresaId) async {
+    return await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("¿Eliminar evento?"),
+        content: Text("Esta acción eliminará '${e.nombre}' permanentemente."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+          TextButton(
+            onPressed: () async {
+              await FirestoreService.instance.borrarEvento(empresaId, e.id);
+              if (mounted) Navigator.pop(ctx, true);
+            },
+            child: const Text("ELIMINAR", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventCard(Evento e) {
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade200),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.all(16),
+        title: Text(e.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+        subtitle: Text('${DateFormat('dd/MM HH:mm').format(e.fechaInicio)}\n${e.ciudad}'),
+        trailing: Wrap(
+          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _EstadoChip(estado: e.estado),
+            IconButton(
+              icon: const Icon(Icons.group_add_outlined, color: Color(0xFF6366F1)),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => AdminAssignmentScreen(initialEvento: e)),
+              ),
+            ),
+          ],
+        ),
+        onTap: () => _openEventForm(context: context, evento: e),
+      ),
+    );
+  }
+
+  Future<void> _openEventForm({required BuildContext context, Evento? evento}) async {
   const empresaId = AppConfig.empresaId;
   final isEditing = evento != null;
 
-  final nombreController = TextEditingController(text: evento?.nombre ?? '');
-  final tipoController = TextEditingController(text: evento?.tipo ?? '');
-  final ciudadController = TextEditingController(text: evento?.ciudad ?? '');
-  final direccionController =
-      TextEditingController(text: evento?.direccion ?? '');
-  final cantidadController = TextEditingController(
-    text: (evento?.cantidadRequeridaTrabajadores ?? 0) > 0
-        ? evento!.cantidadRequeridaTrabajadores.toString()
-        : '',
-  );
-  final rolesController = TextEditingController(
-    text: _rolesToText(evento?.rolesRequeridos),
-  );
+  final nombreCtrl = TextEditingController(text: evento?.nombre ?? '');
+  final tipoCtrl = TextEditingController(text: evento?.tipo ?? '');
+  final ciudadCtrl = TextEditingController(text: evento?.ciudad ?? '');
+  final direccionCtrl = TextEditingController(text: evento?.direccion ?? '');
+  double? pickedLat = evento?.lat;
+  double? pickedLng = evento?.lng;
 
-  DateTime inicio =
-      evento?.fechaInicio ?? DateTime.now().add(const Duration(days: 1));
+
+  DateTime inicio = evento?.fechaInicio ?? DateTime.now().add(const Duration(days: 1));
   DateTime fin = evento?.fechaFin ?? inicio.add(const Duration(hours: 4));
+  String estado = evento?.estado ?? 'activo';
 
-  String estado = _normalizeEstado(evento?.estado);
+  // ✅ Roles con contadores (- / +)
+  final Map<String, int> roles = Map<String, int>.from(evento?.rolesRequeridos ?? {});
+
+  // ✅ si no hay roles aún, inicializamos los tuyos
+  const presetRoles = ['camarero', 'cocinero', 'metre', 'limpiador', 'logistica'];
+  for (final r in presetRoles) {
+    roles.putIfAbsent(r, () => 0);
+  }
+
+  int totalRoles() => roles.values.fold<int>(0, (s, v) => s + v);
+
+  void inc(String r) => roles[r] = (roles[r] ?? 0) + 1;
+  void dec(String r) => roles[r] = ((roles[r] ?? 0) - 1).clamp(0, 999999);
+
+  final newRoleCtrl = TextEditingController();
 
   await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.white,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (context) {
-      return Padding(
+    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (context) => StatefulBuilder(
+      builder: (context, setMState) => Padding(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          left: 16,
-          right: 16,
-          top: 16,
+          left: 24, right: 24, top: 24,
         ),
-        child: StatefulBuilder(
-          builder: (context, setState) {
-            Future<void> pickInicio() async {
-              final result = await _pickDateTime(context, inicio);
-              if (result != null) {
-                setState(() {
-                  inicio = result;
-                  if (!result.isBefore(fin)) {
-                    fin = result.add(const Duration(hours: 4));
-                  }
-                });
-              }
-            }
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(isEditing ? 'Editar Evento' : 'Nuevo Evento',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
 
-            Future<void> pickFin() async {
-              final result = await _pickDateTime(context, fin);
-              if (result != null) {
-                setState(() {
-                  if (!result.isAfter(inicio)) {
-                    fin = inicio.add(const Duration(hours: 1));
-                  } else {
-                    fin = result;
-                  }
-                });
-              }
-            }
+              TextField(
+                controller: nombreCtrl,
+                decoration: const InputDecoration(labelText: "Nombre del evento", border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: tipoCtrl,
+                decoration: const InputDecoration(labelText: "Tipo", border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
 
-            return SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Text(
-                        isEditing ? 'Editar evento' : 'Nuevo evento',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nombreController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nombre del evento',
-                      border: OutlineInputBorder(),
+                  Expanded(
+                    child: ListTile(
+                      title: const Text("Inicio", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      subtitle: Text(DateFormat('dd/MM/yy HH:mm').format(inicio)),
+                      onTap: () async {
+                        final picked = await _pickDateTime(context, inicio);
+                        if (picked != null) setMState(() => inicio = picked);
+                      },
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: tipoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Tipo (boda, comunión, corporativo...)',
-                      border: OutlineInputBorder(),
+                  Expanded(
+                    child: ListTile(
+                      title: const Text("Fin", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      subtitle: Text(DateFormat('dd/MM/yy HH:mm').format(fin)),
+                      onTap: () async {
+                        final picked = await _pickDateTime(context, fin);
+                        if (picked != null) setMState(() => fin = picked);
+                      },
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _FechaHoraField(
-                          label: 'Inicio',
-                          value:
-                              '${_formatFechaCorta(inicio)} · ${_formatHora(inicio)}',
-                          onTap: pickInicio,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _FechaHoraField(
-                          label: 'Fin',
-                          value:
-                              '${_formatFechaCorta(fin)} · ${_formatHora(fin)}',
-                          onTap: pickFin,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: ciudadController,
-                    decoration: const InputDecoration(
-                      labelText: 'Ciudad',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: direccionController,
-                    decoration: const InputDecoration(
-                      labelText: 'Dirección',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: cantidadController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Número de trabajadores necesarios',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: rolesController,
-                    decoration: const InputDecoration(
-                      labelText: 'Roles requeridos (separados por comas)',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
+                ],
+              ),
 
-                  const Text(
-                    'Estado',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+              const SizedBox(height: 12),
+              TextField(
+                controller: ciudadCtrl,
+                decoration: const InputDecoration(labelText: "Ciudad", border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              PlaceAutocompleteField(
+                apiKey: kPlacesApiKey,
+                controller: direccionCtrl,
+                labelText: "Dirección (Google)",
+                hintText: "Escribe y elige una sugerencia…",
+                onPlaceSelected: (sel) {
+                  setMState(() {
+                    direccionCtrl.text = sel.addressText;
+
+                    // Rellena ciudad si viene en el detalle
+                    if ((sel.city ?? '').trim().isNotEmpty) {
+                      ciudadCtrl.text = sel.city!.trim();
+                    }
+
+                    // Guarda coords para el evento
+                    pickedLat = sel.lat;
+                    pickedLng = sel.lng;
+                  });
+                },
+              ),
+
+
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Personal requerido (roles)",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.grey.shade700),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ✅ lista roles con - / + manteniendo diseño simple
+              ...(() {
+                final keys = roles.keys.toList()..sort();
+                return keys.map((r) {
+                  final v = roles[r] ?? 0;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            r,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => setMState(() => dec(r)),
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text("$v", style: const TextStyle(fontWeight: FontWeight.w800)),
+                        IconButton(
+                          onPressed: () => setMState(() => inc(r)),
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList();
+              })(),
+
+              // ✅ añadir rol nuevo
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: newRoleCtrl,
+                      decoration: const InputDecoration(
+                        labelText: "Añadir rol (opcional)",
+                        border: OutlineInputBorder(),
+                      ),
                     ),
                   ),
-                  RadioListTile<String>(
-                    title: const Text('Activo'),
-                    value: 'activo',
-                    groupValue: estado,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => estado = value);
-                      }
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: () {
+                      final r = newRoleCtrl.text.trim();
+                      if (r.isEmpty) return;
+                      setMState(() {
+                        roles.putIfAbsent(r, () => 1);
+                        newRoleCtrl.clear();
+                      });
                     },
-                    dense: true,
-                  ),
-                  RadioListTile<String>(
-                    title: const Text('Borrador'),
-                    value: 'borrador',
-                    groupValue: estado,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => estado = value);
-                      }
-                    },
-                    dense: true,
-                  ),
-                  RadioListTile<String>(
-                    title: const Text('Cancelado'),
-                    value: 'cancelado',
-                    groupValue: estado,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => estado = value);
-                      }
-                    },
-                    dense: true,
-                  ),
-                  RadioListTile<String>(
-                    title: const Text('Finalizado'),
-                    value: 'finalizado',
-                    groupValue: estado,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => estado = value);
-                      }
-                    },
-                    dense: true,
-                  ),
+                    child: const Text("Añadir"),
+                  )
+                ],
+              ),
 
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  "Total: ${totalRoles()} trabajadores",
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: estado,
+                decoration: const InputDecoration(labelText: "Estado", border: OutlineInputBorder()),
+                items: ['borrador', 'activo', 'finalizado', 'cancelado']
+                    .map((s) => DropdownMenuItem(value: s, child: Text(s.toUpperCase())))
+                    .toList(),
+                onChanged: (val) => setMState(() => estado = val!),
+              ),
+
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  if (isEditing) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () async {
+                          final res = await _confirmarBorrado(evento!, empresaId);
+                          if (res == true && mounted) Navigator.pop(context);
+                        },
+                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                        child: const Text("ELIMINAR"),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  Expanded(
                     child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6366F1),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.all(16),
+                      ),
                       onPressed: () async {
-                        final nombre = nombreController.text.trim();
-                        final tipo = tipoController.text.trim();
-                        final ciudad = ciudadController.text.trim();
-                        final direccion = direccionController.text.trim();
-                        final cantidadText = cantidadController.text.trim();
-                        final rolesText = rolesController.text.trim();
+                        if (nombreCtrl.text.trim().isEmpty) return;
 
-                        if (nombre.isEmpty) {
+                        // ✅ limpiamos roles con 0 para no ensuciar
+                        final cleanRoles = <String, int>{};
+                        roles.forEach((k, v) {
+                          if (v > 0) cleanRoles[k] = v;
+                        });
+
+                        if (cleanRoles.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'El nombre del evento es obligatorio',
-                              ),
-                            ),
+                            const SnackBar(content: Text("Añade al menos 1 trabajador en algún rol")),
                           );
                           return;
                         }
 
-                        final cantidad = int.tryParse(cantidadText) ?? 0;
-
-                        // 🔹 Convertimos el texto a Map<String, int>
-                        // "camareros, logistica" -> { "camareros": 1, "logistica": 1 }
-                        final Map<String, int> rolesMap = {};
-                        if (rolesText.isNotEmpty) {
-                          for (final part in rolesText.split(',')) {
-                            final clean = part.trim();
-                            if (clean.isEmpty) continue;
-                            rolesMap[clean] = 1;
-                          }
-                        }
-
                         final nuevo = Evento(
                           id: evento?.id ?? '',
-                          nombre: nombre,
-                          tipo: tipo,
+                          nombre: nombreCtrl.text.trim(),
+                          tipo: tipoCtrl.text.trim(),
                           fechaInicio: inicio,
                           fechaFin: fin,
                           estado: estado,
-                          rolesRequeridos: rolesMap,
-                          cantidadRequeridaTrabajadores: cantidad,
-                          ciudad: ciudad,
-                          direccion: direccion,
+                          ciudad: ciudadCtrl.text.trim(),
+                          direccion: direccionCtrl.text.trim(),
+                          rolesRequeridos: cleanRoles,
+                          cantidadRequeridaTrabajadores: cleanRoles.values.fold(0, (s, v) => s + v),
                           creadoPor: evento?.creadoPor ?? 'admin',
                           creadoEn: evento?.creadoEn ?? DateTime.now(),
+                          // lat/lng NO los forzamos aquí: el EventMapCard los autogenera y cachea si faltan
+                          lat: evento?.lat,
+                          lng: evento?.lng,
                         );
 
-                        try {
-                          if (isEditing) {
-                            await FirestoreService.instance.actualizarEvento(
-                              empresaId,
-                              nuevo,
-                            );
-                          } else {
-                            await FirestoreService.instance.crearEvento(
-                              empresaId,
-                              nuevo,
-                            );
-                          }
-
-                          if (context.mounted) {
-                            Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  isEditing
-                                      ? 'Evento actualizado'
-                                      : 'Evento creado',
-                                ),
-                              ),
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Error al guardar el evento: $e',
-                                ),
-                              ),
-                            );
-                          }
+                        if (isEditing) {
+                          await FirestoreService.instance.actualizarEvento(empresaId, nuevo);
+                        } else {
+                          await FirestoreService.instance.crearEvento(empresaId, nuevo);
                         }
+                        Navigator.pop(context);
                       },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: Text(
-                        isEditing ? 'Guardar cambios' : 'Crear evento',
-                      ),
+                      child: Text(isEditing ? "GUARDAR" : "CREAR"),
                     ),
                   ),
-                  const SizedBox(height: 8),
                 ],
               ),
-            );
-          },
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
-      );
-    },
+      ),
+    ),
   );
 }
 
-//
-// =================== HELPERS / WIDGETS ===================
-//
-
-String _normalizeEstado(String? raw) {
-  const valid = ['activo', 'borrador', 'cancelado', 'finalizado'];
-  if (raw == null) return 'activo';
-  final lower = raw.toLowerCase();
-  if (valid.contains(lower)) return lower;
-  return 'activo';
-}
-
-class _FechaHoraField extends StatelessWidget {
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-
-  const _FechaHoraField({
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-        ),
-        child: Text(
-          value,
-          style: const TextStyle(fontSize: 13),
-        ),
-      ),
+  Future<DateTime?> _pickDateTime(BuildContext context, DateTime initial) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      locale: const Locale('es', 'ES'),
     );
+    if (date == null) return null;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial),
+    );
+    if (time == null) return null;
+
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  String _formatFechaCorta(DateTime d) => DateFormat('dd/MM/yyyy').format(d);
+
+  String _rolesToText(Object? rawRoles) {
+    if (rawRoles is List) return rawRoles.map((e) => e.toString()).join(', ');
+    if (rawRoles is Map) return rawRoles.keys.map((e) => e.toString()).join(', ');
+    return '';
   }
 }
 
 class _EstadoChip extends StatelessWidget {
   final String estado;
-
   const _EstadoChip({required this.estado});
 
   @override
   Widget build(BuildContext context) {
-    Color bg;
-    Color fg;
-    final e = estado.toLowerCase();
-
-    switch (e) {
-      case 'borrador':
-        bg = const Color(0xFFE5E7EB);
-        fg = const Color(0xFF4B5563);
-        break;
-      case 'cancelado':
-        bg = const Color(0xFFFEF2F2);
-        fg = const Color(0xFFB91C1C);
-        break;
-      case 'finalizado':
-        bg = const Color(0xFFDCFCE7);
-        fg = const Color(0xFF15803D);
-        break;
-      case 'activo':
-      default:
-        bg = const Color(0xFFE0F2FE);
-        fg = const Color(0xFF0369A1);
-        break;
-    }
+    Color color = Colors.blue;
+    if (estado == 'finalizado') color = Colors.green;
+    if (estado == 'cancelado') color = Colors.red;
+    if (estado == 'borrador') color = Colors.grey;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
       child: Text(
-        e[0].toUpperCase() + e.substring(1),
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: fg,
-        ),
+        estado.toUpperCase(),
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
       ),
     );
   }
-}
-
-String _formatFechaCorta(DateTime d) {
-  final dia = d.day.toString().padLeft(2, '0');
-  final mes = d.month.toString().padLeft(2, '0');
-  final year = d.year.toString();
-  return '$dia/$mes/$year';
-}
-
-String _rolesToText(Object? rawRoles) {
-  // Si en Firestore es una LISTA ["Montaje", "Seguridad", ...]
-  if (rawRoles is List) {
-    return rawRoles.map((e) => e.toString()).join(', ');
-  }
-
-  // Si en Firestore es un MAP { "camarero": 2, "logistica": 3 }
-  if (rawRoles is Map) {
-    return rawRoles.keys.map((e) => e.toString()).join(', ');
-  }
-
-  // Cualquier otro caso
-  return '';
-}
-
-String _formatHora(DateTime d) {
-  final h = d.hour.toString().padLeft(2, '0');
-  final m = d.minute.toString().padLeft(2, '0');
-  return '$h:$m';
-}
-
-Future<DateTime?> _pickDateTime(
-  BuildContext context,
-  DateTime initial,
-) async {
-  final date = await showDatePicker(
-    context: context,
-    initialDate: initial,
-    firstDate: DateTime(2020),
-    lastDate: DateTime(2100),
-  );
-  if (date == null) return null;
-
-  final time = await showTimePicker(
-    context: context,
-    initialTime: TimeOfDay.fromDateTime(initial),
-  );
-  if (time == null) return null;
-
-  return DateTime(
-    date.year,
-    date.month,
-    date.day,
-    time.hour,
-    time.minute,
-  );
 }

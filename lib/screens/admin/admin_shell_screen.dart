@@ -17,19 +17,38 @@ class AdminShellScreen extends StatefulWidget {
 class _AdminShellScreenState extends State<AdminShellScreen> {
   int _selectedIndex = 0;
 
+  final GlobalKey<ScaffoldState> _scaffoldKey =
+      GlobalKey<ScaffoldState>(); // NUEVO
+
   // Orden EXACTO de las pantallas según el menú
   final List<Widget> _pages = [
-    const AdminHomeScreen(),            // 0 – Dashboard
-    const AdminEventsScreen(),          // 1 – Eventos
-    const AdminWorkersScreen(),         // 2 – Trabajadores
-    const AdminNotificacionesScreen(),  // 3 – Notificaciones
-    const AdminChatScreen(),            // 4 – Chat
+    const AdminHomeScreen(), // 0 – Dashboard
+    const AdminEventsScreen(), // 1 – Eventos
+    const AdminWorkersScreen(), // 2 – Trabajadores
+    const AdminNotificacionesScreen(), // 3 – Notificaciones
+    const AdminChatScreen(), // 4 – Chat
     const AdminPaymentsHistoryScreen(), // 5 – Pagos
-    const AdminDatabaseScreen(),        // 6 – Empresas
+    const AdminDatabaseScreen(), // 6 – Empresas
   ];
 
   @override
   Widget build(BuildContext context) {
+    // MODIFICADO: ahora es responsive (web/tablet/móvil)
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900; // NUEVO
+        final isCompact = constraints.maxWidth < 600; // NUEVO
+
+        if (isWide) {
+          return _buildWideScaffold(context); // NUEVO
+        }
+        return _buildNarrowScaffold(context, isCompact: isCompact); // NUEVO
+      },
+    );
+  }
+
+  // NUEVO: Layout escritorio/web: menú lateral fijo (como estaba antes)
+  Widget _buildWideScaffold(BuildContext context) {
     return Scaffold(
       body: Row(
         children: [
@@ -42,6 +61,183 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // NUEVO: Layout móvil/tablet: Drawer + (en móvil) NavigationBar inferior
+  Widget _buildNarrowScaffold(BuildContext context, {required bool isCompact}) {
+    return Scaffold(
+      key: _scaffoldKey, // NUEVO
+      drawer: Drawer(
+        child: _buildDrawerMenu(context), // NUEVO
+      ),
+      appBar: AppBar(
+        title: Text(_titleForIndex(_selectedIndex)), // NUEVO
+      ),
+      body: Container(
+        color: const Color(0xFFF5F6FA),
+        child: _pages[_selectedIndex],
+      ),
+      bottomNavigationBar: isCompact
+          ? NavigationBar(
+              selectedIndex: _compactNavIndex(), // NUEVO
+              onDestinationSelected: (idx) {
+                // 0 Dashboard, 1 Eventos, 2 Trabajadores, 3 Más // NUEVO
+                if (idx == 3) {
+                  _scaffoldKey.currentState?.openDrawer(); // NUEVO
+                  return;
+                }
+                _onItemTap(idx);
+              },
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.dashboard_outlined),
+                  label: 'Inicio',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.event_outlined),
+                  label: 'Eventos',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.group_outlined),
+                  label: 'Equipo',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.menu),
+                  label: 'Más',
+                ),
+              ],
+            )
+          : null,
+    );
+  }
+
+  // NUEVO
+  int _compactNavIndex() {
+    // Si estás en sección secundaria (notificaciones/chat/pagos/empresas), marcamos "Más".
+    if (_selectedIndex <= 2) return _selectedIndex;
+    return 3;
+  }
+
+  // NUEVO
+  String _titleForIndex(int index) {
+    switch (index) {
+      case 0:
+        return 'Dashboard';
+      case 1:
+        return 'Eventos';
+      case 2:
+        return 'Trabajadores';
+      case 3:
+        return 'Notificaciones';
+      case 4:
+        return 'Chat';
+      case 5:
+        return 'Pagos';
+      case 6:
+        return 'Empresas';
+      default:
+        return 'Admin';
+    }
+  }
+
+  // NUEVO
+  Widget _buildDrawerMenu(BuildContext context) {
+    return SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Text(
+              'EventStaff Admin',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+          ),
+          const Divider(),
+          _drawerItem(
+            context,
+            icon: Icons.dashboard_outlined,
+            label: 'Dashboard',
+            index: 0,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.event_outlined,
+            label: 'Eventos',
+            index: 1,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.group_outlined,
+            label: 'Trabajadores',
+            index: 2,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.notifications_outlined,
+            label: 'Notificaciones',
+            index: 3,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.chat_bubble_outline,
+            label: 'Chat',
+            index: 4,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.payments_outlined,
+            label: 'Pagos',
+            index: 5,
+          ),
+          _drawerItem(
+            context,
+            icon: Icons.business_outlined,
+            label: 'Empresas',
+            index: 6,
+          ),
+          const Divider(),
+          const ListTile(
+            leading: CircleAvatar(
+              radius: 16,
+              child: Text('AD'),
+            ),
+            title: Text('Administrador'),
+            subtitle: Text('admin@eventstaff.com'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.logout, size: 20),
+            title: const Text('Cerrar sesión'),
+            onTap: () {
+              // TODO: logout
+              Navigator.of(context).pop(); // NUEVO
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // NUEVO
+  Widget _drawerItem(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required int index,
+  }) {
+    final isSelected = _selectedIndex == index;
+    return ListTile(
+      leading: Icon(icon),
+      title: Text(label),
+      selected: isSelected,
+      selectedTileColor: Colors.black.withOpacity(0.06), // NUEVO
+      onTap: () {
+        Navigator.of(context).pop(); // NUEVO
+        _onItemTap(index);
+      },
     );
   }
 
@@ -60,7 +256,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                   ),
             ),
             const SizedBox(height: 32),
-
             _SideMenuItem(
               icon: Icons.dashboard_outlined,
               label: 'Dashboard',
@@ -103,7 +298,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
               isSelected: _selectedIndex == 6,
               onTap: () => _onItemTap(6),
             ),
-
             const Spacer(),
             const Divider(),
             const ListTile(

@@ -13,6 +13,8 @@ import '../screens/common/error_screen.dart';
 import '../screens/admin/admin_shell_screen.dart';
 import '../screens/admin/admin_home_screen.dart';
 import '../screens/admin/admin_events_screen.dart';
+import '../screens/admin/admin_workers_screen.dart'; // NUEVO
+import '../screens/admin/admin_chat_screen.dart'; // NUEVO
 import '../screens/admin/admin_database_screen.dart' hide AdminEventScreen;
 import '../screens/admin/admin_import_screen.dart';
 import '../screens/admin/admin_payments_history_screen.dart';
@@ -47,6 +49,8 @@ class Routes {
   static const adminShell = '/admin';
   static const adminHome = '/admin/home';
   static const adminEvents = '/admin/events';
+  static const adminWorkers = '/admin/workers'; // NUEVO
+  static const adminChat = '/admin/chat'; // NUEVO
   static const adminDatabase = '/admin/database';
   static const adminImport = '/admin/import';
   static const adminPaymentsHistory = '/admin/payments-history';
@@ -74,6 +78,8 @@ class Routes {
     adminShell: (_) => const AdminShellScreen(),
     adminHome: (_) => const AdminHomeScreen(),
     adminEvents: (_) => const AdminEventsScreen(),
+    adminWorkers: (_) => const AdminWorkersScreen(), // NUEVO
+    adminChat: (_) => const AdminChatScreen(), // NUEVO
     adminDatabase: (_) => const AdminDatabaseScreen(),
     adminImport: (_) => const AdminImportScreen(),
     adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),

@@ -1,18 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 import '../../models/trabajador.dart';
 import '../../models/disponibilidad_evento.dart';
+import '../../widgets/event_map_card.dart';
+
+enum ModoEnvio { roles, grupos, manual }
+
+class _RoleGroup {
+  final String id;
+  String nombre;
+  Set<String> roles;
+
+  _RoleGroup({
+    required this.id,
+    required this.nombre,
+    required this.roles,
+  });
+}
 
 class AdminAssignmentScreen extends StatefulWidget {
   final Evento? initialEvento;
 
-  const AdminAssignmentScreen({
-    super.key,
-    this.initialEvento,
-  });
+  const AdminAssignmentScreen({super.key, this.initialEvento});
 
   @override
   State<AdminAssignmentScreen> createState() => _AdminAssignmentScreenState();
@@ -21,13 +35,539 @@ class AdminAssignmentScreen extends StatefulWidget {
 class _AdminAssignmentScreenState extends State<AdminAssignmentScreen> {
   final String empresaId = AppConfig.empresaId;
 
-  /// Guardamos solo el ID del evento seleccionado
   String? _selectedEventoId;
+
+  /// ✅ Evento seleccionado (para mostrar mapa)
+  Evento? _selectedEvento;
+
+  /// ✅ Roles requeridos del evento seleccionado (rol -> cantidad)
+  Map<String, int> _rolesRequeridosEvento = {};
+
+  /// ✅ Rango del evento seleccionado (para validar indisponibilidad)
+  DateTime? _eventoInicio;
+  DateTime? _eventoFin;
+
+  /// ✅ Cache para no consultar 1000 veces en modo manual
+  final Map<String, bool> _noDispoCache = {};
+
+  /// ✅ 3 modos
+  ModoEnvio _modo = ModoEnvio.roles;
+
+  /// Roles
+  final Set<String> _rolesSeleccionados = {};
+
+  /// Grupos (solo memoria)
+  final List<_RoleGroup> _grupos = [];
+  final Set<String> _gruposSeleccionados = {};
+
+  /// Manual
+  final Set<String> _trabajadoresSeleccionados = {};
+  String _filtroNombre = "";
 
   @override
   void initState() {
     super.initState();
+    _selectedEvento = widget.initialEvento;
     _selectedEventoId = widget.initialEvento?.id;
+    _rolesRequeridosEvento =
+        Map<String, int>.from(widget.initialEvento?.rolesRequeridos ?? {});
+    _eventoInicio = widget.initialEvento?.fechaInicio;
+    _eventoFin = widget.initialEvento?.fechaFin;
+  }
+
+  // Normalización robusta (minúsculas + sin tildes básicas)
+  String _norm(String s) {
+    var x = s.trim().toLowerCase();
+    x = x
+        .replaceAll('á', 'a')
+        .replaceAll('à', 'a')
+        .replaceAll('ä', 'a')
+        .replaceAll('â', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('è', 'e')
+        .replaceAll('ë', 'e')
+        .replaceAll('ê', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ì', 'i')
+        .replaceAll('ï', 'i')
+        .replaceAll('î', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ò', 'o')
+        .replaceAll('ö', 'o')
+        .replaceAll('ô', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ù', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('û', 'u')
+        .replaceAll('ñ', 'n');
+    return x;
+  }
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  String _dateId(DateTime d) =>
+      "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+
+  List<DateTime> _daysBetweenInclusive(DateTime start, DateTime end) {
+    final s = _dateOnly(start);
+    final e = _dateOnly(end);
+    final days = <DateTime>[];
+    var cur = s;
+    while (!cur.isAfter(e)) {
+      days.add(cur);
+      cur = cur.add(const Duration(days: 1));
+    }
+    return days;
+  }
+
+  /// ✅ Manual: devuelve true si el trabajador está NO disponible en cualquier día del evento
+  Future<bool> _isNoDisponibleParaEvento(Trabajador t) async {
+    final ini = _eventoInicio;
+    final fin = _eventoFin ?? _eventoInicio;
+    if (ini == null || fin == null) return false;
+
+    final dias = _daysBetweenInclusive(ini, fin);
+
+    for (final day in dias) {
+      final key = "${_selectedEventoId ?? 'NONE'}|${t.id}|${_dateId(day)}";
+      final cached = _noDispoCache[key];
+      if (cached != null) {
+        if (cached) return true;
+        continue;
+      }
+
+      final exists = await FirestoreService.instance.verificarIndisponibilidad(
+        empresaId,
+        t.id,
+        day,
+      );
+
+      _noDispoCache[key] = exists;
+
+      if (exists) return true;
+    }
+
+    return false;
+  }
+
+  /// ✅ Filtra y quita trabajadores que han marcado "NO DISPONIBLE" para cualquiera
+  /// de los días del evento (inicio..fin).
+  Future<_FiltroIndispoResult> _filtrarPorIndisponibilidad({
+    required List<Trabajador> candidatos,
+    required DateTime eventoInicio,
+    required DateTime eventoFin,
+  }) async {
+    final fechasEvento = _daysBetweenInclusive(eventoInicio, eventoFin);
+
+    final checks = await Future.wait(candidatos.map((t) async {
+      bool noDispo = false;
+
+      for (final f in fechasEvento) {
+        final exists =
+            await FirestoreService.instance.verificarIndisponibilidad(
+          empresaId,
+          t.id,
+          f,
+        );
+        if (exists) {
+          noDispo = true;
+          break;
+        }
+      }
+
+      return MapEntry(t, noDispo);
+    }));
+
+    final disponibles = <Trabajador>[];
+    final bloqueados = <Trabajador>[];
+
+    for (final entry in checks) {
+      if (entry.value == true) {
+        bloqueados.add(entry.key);
+      } else {
+        disponibles.add(entry.key);
+      }
+    }
+
+    return _FiltroIndispoResult(disponibles: disponibles, bloqueados: bloqueados);
+  }
+
+  /// ✅ Aplica límite por rol según lo requerido en el evento:
+  /// si hay 200 camareros y el evento pide 14, selecciona máximo 14.
+  List<Trabajador> _limitarPorRolesRequeridos({
+    required List<Trabajador> candidatos,
+    required Set<String> rolesSeleccionados,
+  }) {
+    final remaining = <String, int>{};
+
+    for (final r in rolesSeleccionados) {
+      final keyExact = _rolesRequeridosEvento.keys.firstWhere(
+        (k) => _norm(k) == _norm(r),
+        orElse: () => r,
+      );
+      remaining[keyExact] = (_rolesRequeridosEvento[keyExact] ?? 0);
+    }
+
+    for (final r in rolesSeleccionados) {
+      final keyExact = remaining.keys.firstWhere(
+        (k) => _norm(k) == _norm(r),
+        orElse: () => r,
+      );
+      remaining[keyExact] =
+          remaining[keyExact] == 0 ? 999999 : remaining[keyExact]!;
+    }
+
+    final list = List<Trabajador>.from(candidatos);
+    list.shuffle();
+
+    final result = <Trabajador>[];
+
+    for (final t in list) {
+      final rolT = (t.puesto ?? 'Sin Rol').trim();
+      final key = remaining.keys.firstWhere(
+        (k) => _norm(k) == _norm(rolT),
+        orElse: () => '',
+      );
+      if (key.isEmpty) continue;
+
+      final req = remaining[key] ?? 0;
+      if (req > 0) {
+        result.add(t);
+        remaining[key] = req - 1;
+      }
+    }
+
+    return result;
+  }
+
+  Future<void> _enviarSolicitudes(
+      List<Trabajador> todos, List<String> rolesDisponibles) async {
+    if (_selectedEventoId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Selecciona un evento primero")),
+      );
+      return;
+    }
+
+    try {
+      final todosEventos =
+          await FirestoreService.instance.listenEventos(empresaId).first;
+      final eventoActual =
+          todosEventos.firstWhere((e) => e.id == _selectedEventoId);
+
+      _eventoInicio = eventoActual.fechaInicio;
+      _eventoFin = eventoActual.fechaFin;
+      _noDispoCache.clear();
+
+      List<Trabajador> candidatos = [];
+      Set<String> rolesModo = {};
+
+      if (_modo == ModoEnvio.roles) {
+        if (_rolesSeleccionados.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Selecciona al menos un rol")),
+          );
+          return;
+        }
+
+        rolesModo = _rolesSeleccionados.toSet();
+
+        candidatos = todos.where((t) {
+          final rolTrabajador = _norm(t.puesto ?? 'Sin Rol');
+          return rolesModo.any((r) => _norm(r) == rolTrabajador);
+        }).toList();
+      }
+
+      if (_modo == ModoEnvio.grupos) {
+        if (_gruposSeleccionados.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Selecciona al menos un grupo")),
+          );
+          return;
+        }
+
+        final Set<String> unionRoles = {};
+        for (final gid in _gruposSeleccionados) {
+          final g = _grupos.firstWhere(
+            (x) => x.id == gid,
+            orElse: () => _RoleGroup(id: gid, nombre: gid, roles: {}),
+          );
+          unionRoles.addAll(g.roles);
+        }
+
+        if (unionRoles.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text("Los grupos seleccionados no contienen roles")),
+          );
+          return;
+        }
+
+        rolesModo = unionRoles;
+
+        candidatos = todos.where((t) {
+          final rolTrabajador = _norm(t.puesto ?? 'Sin Rol');
+          return rolesModo.any((r) => _norm(r) == rolTrabajador);
+        }).toList();
+      }
+
+      if (_modo == ModoEnvio.manual) {
+        if (_trabajadoresSeleccionados.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Selecciona al menos un trabajador")),
+          );
+          return;
+        }
+        candidatos =
+            todos.where((t) => _trabajadoresSeleccionados.contains(t.id)).toList();
+      }
+
+      final seen = <String>{};
+      candidatos = candidatos.where((t) => seen.add(t.id)).toList();
+
+      if (candidatos.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No hay trabajadores candidatos")),
+        );
+        return;
+      }
+
+      final filtro = await _filtrarPorIndisponibilidad(
+        candidatos: candidatos,
+        eventoInicio: eventoActual.fechaInicio,
+        eventoFin: eventoActual.fechaFin,
+      );
+
+      final bloqueados = filtro.bloqueados;
+      var disponibles = filtro.disponibles;
+
+      if (_modo == ModoEnvio.roles || _modo == ModoEnvio.grupos) {
+        disponibles = _limitarPorRolesRequeridos(
+          candidatos: disponibles,
+          rolesSeleccionados: rolesModo,
+        );
+      }
+
+      if (_modo == ModoEnvio.manual && bloqueados.isNotEmpty) {
+        setState(() {
+          for (final b in bloqueados) {
+            _trabajadoresSeleccionados.remove(b.id);
+          }
+        });
+      }
+
+      if (disponibles.isEmpty) {
+        const msg =
+            "No se enviaron solicitudes: todos los candidatos marcaron NO disponible.";
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text(msg)));
+        return;
+      }
+
+      await FirestoreService.instance.crearSolicitudesDisponibilidadParaEvento(
+        empresaId: empresaId,
+        eventoId: _selectedEventoId!,
+        trabajadores: disponibles,
+      );
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final t in disponibles) {
+        final notifRef = FirebaseFirestore.instance
+            .collection('empresas')
+            .doc(empresaId)
+            .collection('notificaciones')
+            .doc();
+
+        batch.set(notifRef, {
+          'titulo': 'Nueva solicitud: ${eventoActual.nombre}',
+          'body':
+              'Se solicita tu disponibilidad para el día ${DateFormat('dd/MM').format(eventoActual.fechaInicio)}',
+          'tag': 'Eventos',
+          'dirigidoA': t.id,
+          'creadoEn': FieldValue.serverTimestamp(),
+          'leido': false,
+        });
+      }
+      await batch.commit();
+
+      if (!mounted) return;
+
+      final msg = (bloqueados.isNotEmpty)
+          ? "Enviadas a ${disponibles.length}. Omitidos ${bloqueados.length} por NO disponible."
+          : "Solicitudes enviadas a ${disponibles.length} trabajadores.";
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error al procesar el envío: $e")),
+      );
+    }
+  }
+
+  void _ensureGrupoTodos(List<String> rolesDisponibles) {
+    final existingIndex = _grupos.indexWhere((g) => g.id == 'ALL');
+    if (existingIndex == -1) {
+      _grupos.insert(
+        0,
+        _RoleGroup(id: 'ALL', nombre: 'Todos', roles: rolesDisponibles.toSet()),
+      );
+    } else {
+      _grupos[existingIndex].roles = rolesDisponibles.toSet();
+      _grupos[existingIndex].nombre = 'Todos';
+      if (existingIndex != 0) {
+        final g = _grupos.removeAt(existingIndex);
+        _grupos.insert(0, g);
+      }
+    }
+  }
+
+  Future<void> _openCrearGrupoDialog(List<String> rolesDisponibles) async {
+    final nameCtrl = TextEditingController();
+    final Set<String> rolesTmp = {};
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setMState) => Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Crear grupo",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+
+                  /// ✅ AQUÍ ES TextField (NO Places)
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: "Nombre del grupo",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "Selecciona roles",
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: rolesDisponibles.map((r) {
+                      final selected = rolesTmp.contains(r);
+                      return FilterChip(
+                        label: Text(r),
+                        selected: selected,
+                        onSelected: (v) => setMState(() {
+                          if (v) {
+                            rolesTmp.add(r);
+                          } else {
+                            rolesTmp.remove(r);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text("CANCELAR"),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            final nombre = nameCtrl.text.trim();
+                            if (nombre.isEmpty || rolesTmp.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    "Pon nombre y selecciona al menos 1 rol",
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+
+                            setState(() {
+                              final id = DateTime.now()
+                                  .millisecondsSinceEpoch
+                                  .toString();
+                              _grupos.add(
+                                _RoleGroup(
+                                  id: id,
+                                  nombre: nombre,
+                                  roles: rolesTmp.toSet(),
+                                ),
+                              );
+                            });
+
+                            Navigator.pop(ctx);
+                          },
+                          child: const Text("GUARDAR"),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _setModo(ModoEnvio m) {
+    setState(() {
+      _modo = m;
+      if (m != ModoEnvio.roles) _rolesSeleccionados.clear();
+      if (m != ModoEnvio.grupos) _gruposSeleccionados.clear();
+      if (m != ModoEnvio.manual) _trabajadoresSeleccionados.clear();
+      _filtroNombre = "";
+    });
+  }
+
+  Future<void> _seleccionarFiltradosSoloDisponibles(
+      List<Trabajador> trabajadoresFiltrados) async {
+    final ids = <String>{};
+
+    for (final t in trabajadoresFiltrados) {
+      final noDisponible = await _isNoDisponibleParaEvento(t);
+      if (!noDisponible) ids.add(t.id);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _trabajadoresSeleccionados.addAll(ids);
+    });
   }
 
   @override
@@ -35,813 +575,420 @@ class _AdminAssignmentScreenState extends State<AdminAssignmentScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
       appBar: AppBar(
+        title: const Text('Asignación de Personal'),
         backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
         elevation: 0.5,
-        title: const Text(
-          'Asignación de personal',
-          style: TextStyle(
-            color: Color(0xFF111827),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
       ),
       body: Column(
         children: [
-          const SizedBox(height: 12),
+          _buildSelector(),
 
-          // =================== SELECTOR DE EVENTO ===================
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: StreamBuilder<List<Evento>>(
-              stream: FirestoreService.instance.listenEventos(empresaId),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
+          /// ✅ MAPA DEL EVENTO (si hay evento seleccionado)
+          if (_selectedEvento != null) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: EventMapCard(evento: _selectedEvento!),
+            ),
+            const SizedBox(height: 12),
+          ],
 
-                final eventos = (snapshot.data ?? [])
-                    .where((e) => e.estado.toLowerCase() == 'activo')
-                    .toList()
-                  ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
-
-                if (eventos.isEmpty) {
-                  return const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text(
-                        'No hay eventos activos.\n'
-                        'Crea un evento y márcalo como "Activo" para poder asignar personal.',
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  );
-                }
-
-                // Aseguramos que _selectedEventoId siempre apunte a uno de la lista
-                if (_selectedEventoId == null) {
-                  _selectedEventoId = eventos.first.id;
-                } else {
-                  final existe =
-                      eventos.any((e) => e.id == _selectedEventoId);
-                  if (!existe) {
-                    _selectedEventoId = eventos.first.id;
-                  }
-                }
-
-                final selectedEvento = eventos.firstWhere(
-                  (e) => e.id == _selectedEventoId,
-                  orElse: () => eventos.first,
-                );
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Selecciona evento',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF374151),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: _selectedEventoId,
-                      items: eventos
-                          .map(
-                            (e) => DropdownMenuItem<String>(
-                              value: e.id,
-                              child: Text(
-                                '${e.nombre} · ${_formatFechaCorta(e.fechaInicio)}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedEventoId = value;
-                        });
-                      },
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Sección de enviar solicitudes usando el evento seleccionado
-                    _EnviarSolicitudesSection(
-                      empresaId: empresaId,
-                      evento: selectedEvento,
-                    ),
-                    const SizedBox(height: 8),
-                    // La lista de disponibilidad va en el Expanded de abajo
-                  ],
-                );
-              },
+          const Divider(height: 1),
+          _buildPanelEnvio(),
+          const Divider(height: 1),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              "RESPUESTAS DE DISPONIBILIDAD",
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
             ),
           ),
-
-          // =================== LISTA DE DISPONIBILIDAD ===================
-          Expanded(
-            child: StreamBuilder<List<Evento>>(
-              stream: FirestoreService.instance.listenEventos(empresaId),
-              builder: (context, snapshot) {
-                final eventos = (snapshot.data ?? [])
-                    .where((e) => e.estado.toLowerCase() == 'activo')
-                    .toList()
-                  ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
-
-                if (eventos.isEmpty || _selectedEventoId == null) {
-                  return const SizedBox.shrink();
-                }
-
-                final selectedEvento = eventos.firstWhere(
-                  (e) => e.id == _selectedEventoId,
-                  orElse: () => eventos.first,
-                );
-
-                return _DisponibilidadList(
-                  empresaId: empresaId,
-                  evento: selectedEvento,
-                );
-              },
-            ),
-          ),
+          Expanded(child: _buildListaRespuestas()),
         ],
       ),
     );
   }
-}
 
-// ================= SUBWIDGET: Enviar solicitudes =================
+  Widget _buildSelector() {
+    return StreamBuilder<List<Evento>>(
+      stream: FirestoreService.instance.listenEventos(empresaId),
+      builder: (context, snap) {
+        if (!snap.hasData) return const LinearProgressIndicator();
 
-class _EnviarSolicitudesSection extends StatefulWidget {
-  final String empresaId;
-  final Evento evento;
+        final eventosActivos =
+            snap.data!.where((e) => e.estado != 'cancelado').toList();
 
-  const _EnviarSolicitudesSection({
-    required this.empresaId,
-    required this.evento,
-  });
+        if (_selectedEventoId == null && eventosActivos.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() {
+              final ev = eventosActivos.first;
+              _selectedEventoId = ev.id;
+              _selectedEvento = ev;
+              _rolesRequeridosEvento = Map<String, int>.from(ev.rolesRequeridos);
+              _eventoInicio = ev.fechaInicio;
+              _eventoFin = ev.fechaFin;
 
-  @override
-  State<_EnviarSolicitudesSection> createState() =>
-      _EnviarSolicitudesSectionState();
-}
-
-class _EnviarSolicitudesSectionState extends State<_EnviarSolicitudesSection> {
-  /// true = selección por roles, false = por nombres
-  bool _porRoles = true;
-
-  /// Roles seleccionados (String con el nombre del rol/puesto)
-  final Set<String> _rolesSeleccionados = {};
-
-  /// IDs de trabajadores seleccionados cuando estamos en modo nombres
-  final Set<String> _trabajadoresSeleccionados = {};
-
-  /// Texto de búsqueda por nombre en modo nombres
-  String _busquedaNombre = '';
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<Trabajador>>(
-      stream: FirestoreService.instance.listenTrabajadores(widget.empresaId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(8),
-              child: CircularProgressIndicator(),
-            ),
-          );
+              _rolesSeleccionados.clear();
+              _gruposSeleccionados.clear();
+              _trabajadoresSeleccionados.clear();
+              _filtroNombre = "";
+              _noDispoCache.clear();
+            });
+          });
         }
 
-        final trabajadores = snapshot.data ?? [];
-
-        if (trabajadores.isEmpty) {
-          return const Card(
-            child: Padding(
-              padding: EdgeInsets.all(12),
-              child: Text(
-                'No hay trabajadores registrados en la empresa.',
-              ),
+        return Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(16),
+          child: DropdownButtonFormField<String>(
+            value: _selectedEventoId,
+            decoration: const InputDecoration(
+              labelText: "Seleccionar Evento",
+              border: OutlineInputBorder(),
             ),
-          );
-        }
+            items: eventosActivos
+                .map((e) => DropdownMenuItem(value: e.id, child: Text(e.nombre)))
+                .toList(),
+            onChanged: (v) {
+              if (v == null) return;
+              final ev = eventosActivos.firstWhere((e) => e.id == v);
+              setState(() {
+                _selectedEventoId = v;
+                _selectedEvento = ev;
+                _rolesRequeridosEvento = Map<String, int>.from(ev.rolesRequeridos);
+                _eventoInicio = ev.fechaInicio;
+                _eventoFin = ev.fechaFin;
 
-        // Lista de roles distintos (usando campo `puesto`)
-        final roles = trabajadores
-            .map((t) => (t.puesto ?? '').trim())
-            .where((r) => r.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-
-        // Cálculo de cuántos trabajadores están seleccionados
-        final int seleccionados = _porRoles
-            ? trabajadores
-                .where((t) =>
-                    (t.puesto != null &&
-                        _rolesSeleccionados.contains(t.puesto)))
-                .length
-            : _trabajadoresSeleccionados.length;
-
-        return Card(
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Evento: ${widget.evento.nombre}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF111827),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  seleccionados == 0
-                      ? 'Selecciona roles o trabajadores a los que enviar la solicitud.'
-                      : 'Se enviará solicitud a $seleccionados trabajador(es) seleccionados.',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF4B5563),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Selector de modo: por roles / por nombres
-                Row(
-                  children: [
-                    ChoiceChip(
-                      label: const Text('Por roles'),
-                      selected: _porRoles,
-                      onSelected: (value) {
-                        if (value) {
-                          setState(() {
-                            _porRoles = true;
-                          });
-                        }
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                    ChoiceChip(
-                      label: const Text('Por nombres'),
-                      selected: !_porRoles,
-                      onSelected: (value) {
-                        if (value) {
-                          setState(() {
-                            _porRoles = false;
-                          });
-                        }
-                      },
-                    ),
-                    const Spacer(),
-                    ElevatedButton.icon(
-                      onPressed: () async {
-                        // Filtrar trabajadores según el modo
-                        final List<Trabajador> destino = _porRoles
-                            ? trabajadores
-                                .where((t) =>
-                                    (t.puesto != null &&
-                                        _rolesSeleccionados.contains(t.puesto)))
-                                .toList()
-                            : trabajadores
-                                .where((t) =>
-                                    _trabajadoresSeleccionados.contains(t.id))
-                                .toList();
-
-                        if (destino.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Selecciona al menos un rol o un trabajador.',
-                              ),
-                            ),
-                          );
-                          return;
-                        }
-
-                        try {
-                          await FirestoreService.instance
-                              .crearSolicitudesDisponibilidadParaEvento(
-                            empresaId: widget.empresaId,
-                            eventoId: widget.evento.id,
-                            trabajadores: destino,
-                          );
-
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Solicitudes de disponibilidad enviadas a ${destino.length} trabajador(es).',
-                                ),
-                              ),
-                            );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content:
-                                    Text('Problema al enviar solicitudes: $e'),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      icon: const Icon(Icons.send_outlined),
-                      label: const Text('Enviar'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                // Contenido según modo
-                if (_porRoles)
-                  _buildSeleccionPorRoles(roles)
-                else
-                  _buildSeleccionPorNombres(trabajadores),
-              ],
-            ),
+                _rolesSeleccionados.clear();
+                _gruposSeleccionados.clear();
+                _trabajadoresSeleccionados.clear();
+                _filtroNombre = "";
+                _noDispoCache.clear();
+              });
+            },
           ),
         );
       },
     );
   }
 
-  /// Selección usando roles (FilterChip)
-  Widget _buildSeleccionPorRoles(List<String> roles) {
-    if (roles.isEmpty) {
-      return const Text(
-        'Los trabajadores no tienen un rol asignado. No es posible filtrar por rol.',
-        style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
-      );
-    }
+  Widget _buildPanelEnvio() {
+    return StreamBuilder<List<Trabajador>>(
+      stream: FirestoreService.instance.listenTrabajadores(empresaId),
+      builder: (context, snap) {
+        if (!snap.hasData) return const SizedBox();
+        final trabajadores = snap.data!;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: roles.map((puesto) {
-          final seleccionado = _rolesSeleccionados.contains(puesto);
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(puesto),
-              selected: seleccionado,
-              onSelected: (value) {
-                setState(() {
-                  if (value) {
-                    _rolesSeleccionados.add(puesto);
-                  } else {
-                    _rolesSeleccionados.remove(puesto);
-                  }
-                });
-              },
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
+        final rolesDisponibles = _rolesRequeridosEvento.keys.toList()..sort();
 
-  /// Selección usando nombres + buscador
-  Widget _buildSeleccionPorNombres(List<Trabajador> trabajadores) {
-    // Filtro por nombre / apellidos
-    final filtrados = trabajadores.where((t) {
-      final nombre = (t.nombre ?? '').toLowerCase();
-      final apellidos = (t.apellidos ?? '').toLowerCase();
-      final query = _busquedaNombre.toLowerCase().trim();
-
-      if (query.isEmpty) return true;
-      return nombre.contains(query) || apellidos.contains(query);
-    }).toList()
-      ..sort(
-        (a, b) => (a.nombre ?? '').compareTo(b.nombre ?? ''),
-      );
-
-    return SizedBox(
-      height: 260,
-      child: Column(
-        children: [
-          TextField(
-            decoration: const InputDecoration(
-              labelText: 'Buscar por nombre',
-              isDense: true,
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.search, size: 18),
-            ),
-            onChanged: (value) {
-              setState(() => _busquedaNombre = value);
-            },
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView.builder(
-              itemCount: filtrados.length,
-              itemBuilder: (context, index) {
-                final t = filtrados[index];
-                final seleccionado =
-                    _trabajadoresSeleccionados.contains(t.id);
-                final nombre = t.nombre ?? 'Sin nombre';
-                final apellidos = t.apellidos ?? '';
-                final puesto = t.puesto ?? '';
-
-                return CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text('$nombre $apellidos'.trim()),
-                  subtitle: puesto.isNotEmpty
-                      ? Text(
-                          puesto,
-                          style: const TextStyle(fontSize: 11),
-                        )
-                      : null,
-                  value: seleccionado,
-                  onChanged: (value) {
-                    setState(() {
-                      if (value == true) {
-                        _trabajadoresSeleccionados.add(t.id);
-                      } else {
-                        _trabajadoresSeleccionados.remove(t.id);
-                      }
-                    });
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============= LISTA DE DISPONIBILIDAD (AGRUPADA POR FECHA) =============
-
-class _DisponibilidadList extends StatelessWidget {
-  final String empresaId;
-  final Evento evento;
-
-  const _DisponibilidadList({
-    required this.empresaId,
-    required this.evento,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<DisponibilidadEvento>>(
-      stream: FirestoreService.instance.listenDisponibilidadEvento(
-        empresaId,
-        evento.id,
-      ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final lista = List<DisponibilidadEvento>.from(snapshot.data ?? []);
-
-        if (lista.isEmpty) {
-          return const Center(
-            child: Text(
-              'Aún no se han enviado solicitudes de disponibilidad\n'
-              'o no hay respuestas para este evento.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Color(0xFF6B7280),
-              ),
+        if (rolesDisponibles.isEmpty) {
+          return Container(
+            color: Colors.white,
+            padding: const EdgeInsets.all(16),
+            child: const Text(
+              "Este evento no tiene roles definidos. Edita el evento y añade cantidades por rol.",
+              style: TextStyle(color: Colors.red),
             ),
           );
         }
 
-        // Ordenamos por fecha de creación (más reciente arriba)
-        lista.sort((a, b) => b.creadoEn.compareTo(a.creadoEn));
+        _ensureGrupoTodos(rolesDisponibles);
 
-        // Construimos items con cabeceras por día
-        final items = <_DisponibilidadUIItem>[];
-        String lastDate = '';
-        for (final d in lista) {
-          final dateStr = _formatFechaCorta(d.creadoEn);
-          if (dateStr != lastDate) {
-            items.add(_DisponibilidadUIItem.header(dateStr));
-            lastDate = dateStr;
-          }
-          items.add(_DisponibilidadUIItem.item(d));
-        }
+        final trabajadoresFiltrados = trabajadores
+            .where((t) => t.nombre.toLowerCase().contains(_filtroNombre.toLowerCase()))
+            .toList()
+          ..sort((a, b) => a.nombre.compareTo(b.nombre));
 
-        // Resumen rápido
-        final total = lista.length;
-        final aceptados =
-            lista.where((d) => d.estado == 'aceptado').length;
-        final rechazados =
-            lista.where((d) => d.estado == 'rechazado').length;
-        final pendientes =
-            lista.where((d) => d.estado == 'pendiente').length;
-        final asignados = lista.where((d) => d.asignado).length;
-
-        return Column(
-          children: [
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Row(
+        return Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
                 children: [
-                  _ResumenChip(
-                    label: 'Total',
-                    value: total,
-                    colorBg: const Color(0xFFE5E7EB),
-                    colorText: const Color(0xFF111827),
+                  ChoiceChip(
+                    label: const Text("Roles"),
+                    selected: _modo == ModoEnvio.roles,
+                    onSelected: (_) => _setModo(ModoEnvio.roles),
                   ),
                   const SizedBox(width: 8),
-                  _ResumenChip(
-                    label: 'Pendientes',
-                    value: pendientes,
-                    colorBg: const Color(0xFFFDE68A),
-                    colorText: const Color(0xFF92400E),
+                  ChoiceChip(
+                    label: const Text("Grupos"),
+                    selected: _modo == ModoEnvio.grupos,
+                    onSelected: (_) => _setModo(ModoEnvio.grupos),
                   ),
                   const SizedBox(width: 8),
-                  _ResumenChip(
-                    label: 'Aceptados',
-                    value: aceptados,
-                    colorBg: const Color(0xFFDCFCE7),
-                    colorText: const Color(0xFF166534),
-                  ),
-                  const SizedBox(width: 8),
-                  _ResumenChip(
-                    label: 'Asignados',
-                    value: asignados,
-                    colorBg: const Color(0xFFDBEAFE),
-                    colorText: const Color(0xFF1D4ED8),
+                  ChoiceChip(
+                    label: const Text("Manual"),
+                    selected: _modo == ModoEnvio.manual,
+                    onSelected: (_) => _setModo(ModoEnvio.manual),
                   ),
                   const Spacer(),
-                  _ResumenChip(
-                    label: 'Rechazados',
-                    value: rechazados,
-                    colorBg: const Color(0xFFFEF2F2),
-                    colorText: const Color(0xFFB91C1C),
+                  ElevatedButton.icon(
+                    onPressed: () => _enviarSolicitudes(trabajadores, rolesDisponibles),
+                    icon: const Icon(Icons.send),
+                    label: const Text("ENVIAR"),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 4),
-            Expanded(
-              child: ListView.builder(
-                padding:
-                    const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                itemCount: items.length,
-                itemBuilder: (context, index) {
-                  final item = items[index];
+              const SizedBox(height: 12),
 
-                  // Cabecera de fecha
-                  if (item.header != null) {
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
+              if (_modo == ModoEnvio.roles) ...[
+                Row(
+                  children: [
+                    ActionChip(
+                      label: const Text("Todos los roles"),
+                      onPressed: () => setState(() {
+                        _rolesSeleccionados
+                          ..clear()
+                          ..addAll(rolesDisponibles);
+                      }),
+                    ),
+                    const SizedBox(width: 8),
+                    ActionChip(
+                      label: const Text("Limpiar"),
+                      onPressed: () => setState(() => _rolesSeleccionados.clear()),
+                    ),
+                    const Spacer(),
+                    Text(
+                      "${_rolesSeleccionados.length}/${rolesDisponibles.length}",
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  children: rolesDisponibles.map((r) {
+                    final req = _rolesRequeridosEvento[r] ?? 0;
+                    return FilterChip(
+                      label: Text("$r ($req)"),
+                      selected: _rolesSeleccionados.contains(r),
+                      onSelected: (v) => setState(() {
+                        if (v) {
+                          _rolesSeleccionados.add(r);
+                        } else {
+                          _rolesSeleccionados.remove(r);
+                        }
+                      }),
+                    );
+                  }).toList(),
+                ),
+              ],
+
+              if (_modo == ModoEnvio.grupos) ...[
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => _openCrearGrupoDialog(rolesDisponibles),
+                      icon: const Icon(Icons.add),
+                      label: const Text("Crear grupo"),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        _gruposSeleccionados
+                          ..clear()
+                          ..add('ALL');
+                      }),
+                      child: const Text("Seleccionar: Todos"),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => setState(() => _gruposSeleccionados.clear()),
+                      child: const Text("Limpiar"),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  children: _grupos.map((g) {
+                    final selected = _gruposSeleccionados.contains(g.id);
+                    return FilterChip(
+                      label: Text(g.nombre),
+                      selected: selected,
+                      onSelected: (v) => setState(() {
+                        if (v) {
+                          _gruposSeleccionados.add(g.id);
+                        } else {
+                          _gruposSeleccionados.remove(g.id);
+                        }
+                      }),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 8),
+                Builder(
+                  builder: (_) {
+                    final Set<String> unionRoles = {};
+                    for (final gid in _gruposSeleccionados) {
+                      final g = _grupos.firstWhere(
+                        (x) => x.id == gid,
+                        orElse: () => _RoleGroup(id: gid, nombre: gid, roles: {}),
+                      );
+                      unionRoles.addAll(g.roles);
+                    }
+                    final rolesTxt = unionRoles.toList()..sort();
+                    return Align(
+                      alignment: Alignment.centerLeft,
                       child: Text(
-                        item.header!,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
+                        "Roles incluidos: ${rolesTxt.isEmpty ? '—' : rolesTxt.join(', ')}",
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     );
-                  }
+                  },
+                ),
+              ],
 
-                  final d = item.data!;
+              if (_modo == ModoEnvio.manual) ...[
+                /// ✅ AQUÍ ES TextField (NO Places)
+                TextField(
+                  decoration: const InputDecoration(
+                    hintText: "Buscar por nombre...",
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (v) => setState(() => _filtroNombre = v),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton(
+                      onPressed: () =>
+                          _seleccionarFiltradosSoloDisponibles(trabajadoresFiltrados),
+                      child: const Text("Seleccionar filtrados"),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() => _trabajadoresSeleccionados.clear()),
+                      child: const Text("Limpiar"),
+                    ),
+                    const Spacer(),
+                    Text(
+                      "${_trabajadoresSeleccionados.length} seleccionados",
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                SizedBox(
+                  height: 220,
+                  child: ListView.builder(
+                    itemCount: trabajadoresFiltrados.length,
+                    itemBuilder: (context, i) {
+                      final t = trabajadoresFiltrados[i];
 
-                  return Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  d.trabajadorNombre,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (d.trabajadorRol.isNotEmpty) ...[
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    d.trabajadorRol,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF6B7280),
-                                    ),
-                                  ),
-                                ],
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: [
-                                    _EstadoDisponibilidadChip(
-                                      estado: d.estado,
-                                      asignado: d.asignado,
-                                    ),
-                                    if (d.asignado) ...[
-                                      const SizedBox(width: 8),
-                                      const Text(
-                                        'Asignado a este evento',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Color(0xFF10B981),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ],
+                      return FutureBuilder<bool>(
+                        future: _isNoDisponibleParaEvento(t),
+                        builder: (context, snapNo) {
+                          final noDisponible = snapNo.data == true;
+                          final selected = _trabajadoresSeleccionados.contains(t.id);
+
+                          return CheckboxListTile(
+                            dense: true,
+                            value: noDisponible ? false : selected,
+                            title: Text(
+                              t.nombre,
+                              style: TextStyle(
+                                color: noDisponible ? Colors.grey : null,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          if (d.estado == 'aceptado' &&
-                              !d.asignado)
-                            ElevatedButton(
-                              onPressed: () async {
-                                await FirestoreService.instance
-                                    .marcarTrabajadorAsignado(
-                                  empresaId: empresaId,
-                                  eventoId: evento.id,
-                                  disponibilidadId: d.id,
-                                  asignado: true,
-                                );
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Trabajador asignado a "${evento.nombre}"',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: const Text('Asignar'),
+                            subtitle: Text(
+                              noDisponible ? "NO DISPONIBLE" : (t.puesto ?? 'Sin Rol'),
+                              style: TextStyle(color: noDisponible ? Colors.red : null),
                             ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                            onChanged: noDisponible
+                                ? null
+                                : (v) => setState(() {
+                                      if (v == true) {
+                                        _trabajadoresSeleccionados.add(t.id);
+                                      } else {
+                                        _trabajadoresSeleccionados.remove(t.id);
+                                      }
+                                    }),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildListaRespuestas() {
+    if (_selectedEventoId == null) {
+      return const Center(child: Text("Selecciona un evento para ver respuestas"));
+    }
+
+    return StreamBuilder<List<DisponibilidadEvento>>(
+      stream: FirestoreService.instance.listenDisponibilidadEvento(
+        empresaId,
+        _selectedEventoId!,
+      ),
+      builder: (context, snap) {
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+        final lista = snap.data!;
+        if (lista.isEmpty) return const Center(child: Text("No hay solicitudes enviadas aún"));
+
+        return ListView.builder(
+          itemCount: lista.length,
+          itemBuilder: (context, i) {
+            final d = lista[i];
+
+            return ListTile(
+              leading: Icon(
+                d.estado == 'aceptado'
+                    ? Icons.check_circle
+                    : d.estado == 'rechazado'
+                        ? Icons.cancel
+                        : Icons.help,
+                color: d.estado == 'aceptado'
+                    ? Colors.green
+                    : d.estado == 'rechazado'
+                        ? Colors.red
+                        : Colors.orange,
               ),
-            ),
-          ],
+              title: Text(d.trabajadorNombre),
+              subtitle: Text(d.estado.toUpperCase()),
+              trailing: d.asignado
+                  ? const Text(
+                      "ASIGNADO",
+                      style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+                    )
+                  : d.estado == 'aceptado'
+                      ? ElevatedButton(
+                          onPressed: () => FirestoreService.instance.marcarTrabajadorAsignado(
+                            empresaId: empresaId,
+                            eventoId: _selectedEventoId!,
+                            disponibilidadId: d.id,
+                            asignado: true,
+                          ),
+                          child: const Text("Asignar"),
+                        )
+                      : null,
+            );
+          },
         );
       },
     );
   }
 }
 
-// Item genérico para la lista agrupada
-class _DisponibilidadUIItem {
-  final String? header;
-  final DisponibilidadEvento? data;
+class _FiltroIndispoResult {
+  final List<Trabajador> disponibles;
+  final List<Trabajador> bloqueados;
 
-  const _DisponibilidadUIItem._({this.header, this.data});
-
-  factory _DisponibilidadUIItem.header(String text) =>
-      _DisponibilidadUIItem._(header: text);
-
-  factory _DisponibilidadUIItem.item(DisponibilidadEvento d) =>
-      _DisponibilidadUIItem._(data: d);
-}
-
-class _ResumenChip extends StatelessWidget {
-  final String label;
-  final int value;
-  final Color colorBg;
-  final Color colorText;
-
-  const _ResumenChip({
-    required this.label,
-    required this.value,
-    required this.colorBg,
-    required this.colorText,
+  _FiltroIndispoResult({
+    required this.disponibles,
+    required this.bloqueados,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: colorBg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        children: [
-          Text(
-            '$label: ',
-            style: TextStyle(
-              fontSize: 11,
-              color: colorText.withOpacity(0.8),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Text(
-            '$value',
-            style: TextStyle(
-              fontSize: 11,
-              color: colorText,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EstadoDisponibilidadChip extends StatelessWidget {
-  final String estado;
-  final bool asignado;
-
-  const _EstadoDisponibilidadChip({
-    required this.estado,
-    required this.asignado,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color bg;
-    Color fg;
-    String label = estado;
-
-    switch (estado) {
-      case 'aceptado':
-        bg = const Color(0xFFDCFCE7);
-        fg = const Color(0xFF15803D);
-        label = 'Disponible';
-        break;
-      case 'rechazado':
-        bg = const Color(0xFFFEF2F2);
-        fg = const Color(0xFFB91C1C);
-        label = 'No disponible';
-        break;
-      case 'pendiente':
-      default:
-        bg = const Color(0xFFE5E7EB);
-        fg = const Color(0xFF4B5563);
-        label = 'Pendiente';
-        break;
-    }
-
-    if (asignado) {
-      bg = const Color(0xFFDBEAFE);
-      fg = const Color(0xFF1D4ED8);
-      label = 'Asignado';
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: fg,
-        ),
-      ),
-    );
-  }
-}
-
-String _formatFechaCorta(DateTime d) {
-  final dia = d.day.toString().padLeft(2, '0');
-  final mes = d.month.toString().padLeft(2, '0');
-  final year = d.year.toString();
-  return '$dia/$mes/$year';
 }

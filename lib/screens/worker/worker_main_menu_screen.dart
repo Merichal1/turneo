@@ -26,7 +26,6 @@ class WorkerMainMenuScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // CABECERA
               Text(
                 'Hola, $saludoNombre 👋',
                 style: const TextStyle(
@@ -37,7 +36,7 @@ class WorkerMainMenuScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               const Text(
-                'Este es tu panel principal. Desde aquí puedes ir a tus eventos, disponibilidad y más.',
+                'Aquí puedes ver tus asignaciones, marcar días no disponibles y revisar avisos.',
                 style: TextStyle(
                   fontSize: 13,
                   color: Color(0xFF6B7280),
@@ -54,39 +53,39 @@ class WorkerMainMenuScreen extends StatelessWidget {
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   _MenuCard(
-                    icon: Icons.event_note,
-                    title: 'Mis eventos',
-                    subtitle: 'Turnos y detalles',
-                    color: const Color(0xFF3B82F6),
-                    onTap: () => onNavigateToTab(1), // pestaña Eventos
-                  ),
-                  _MenuCard(
-                    icon: Icons.event_available,
-                    title: 'Disponibilidad',
-                    subtitle: 'Marca cuándo puedes trabajar',
+                    icon: Icons.calendar_month,
+                    title: 'Mi calendario',
+                    subtitle: 'Asignaciones + días no disponibles',
                     color: const Color(0xFF10B981),
-                    onTap: () => onNavigateToTab(2), // pestaña Disponibilidad
+                    onTap: () => onNavigateToTab(1), // ✅ Calendario
                   ),
                   _MenuCard(
                     icon: Icons.notifications,
                     title: 'Notificaciones',
                     subtitle: 'Solicitudes del administrador',
                     color: const Color(0xFFF97316),
-                    onTap: () => onNavigateToTab(3), // pestaña Notificaciones
+                    onTap: () => onNavigateToTab(2), // ✅ Avisos
+                  ),
+                  _MenuCard(
+                    icon: Icons.history,
+                    title: 'Historial',
+                    subtitle: 'Eventos anteriores y estados',
+                    color: const Color(0xFF3B82F6),
+                    onTap: () => onNavigateToTab(3), // ✅ Historial
                   ),
                   _MenuCard(
                     icon: Icons.chat_bubble,
                     title: 'Mensajes',
                     subtitle: 'Admin y compañeros',
                     color: const Color(0xFF6366F1),
-                    onTap: () => onNavigateToTab(5), // pestaña Chat
+                    onTap: () => onNavigateToTab(4), // ✅ Chat
                   ),
                 ],
               ),
 
               const SizedBox(height: 24),
 
-              // SECCIÓN PERFIL / HISTORIAL
+              // SECCIÓN PERFIL
               const Text(
                 'Tu cuenta',
                 style: TextStyle(
@@ -97,17 +96,10 @@ class WorkerMainMenuScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               _ListTileCard(
-                icon: Icons.history,
-                title: 'Historial de eventos',
-                subtitle: 'Eventos anteriores y estados',
-                onTap: () => onNavigateToTab(4), // pestaña Historial
-              ),
-              const SizedBox(height: 8),
-              _ListTileCard(
                 icon: Icons.person,
                 title: 'Mi perfil',
                 subtitle: 'Datos personales y contacto',
-                onTap: () => onNavigateToTab(6), // pestaña Perfil
+                onTap: () => onNavigateToTab(5), // ✅ Perfil
               ),
             ],
           ),
@@ -156,11 +148,7 @@ class _MenuCard extends StatelessWidget {
             CircleAvatar(
               radius: 18,
               backgroundColor: color.withOpacity(0.12),
-              child: Icon(
-                icon,
-                color: color,
-                size: 20,
-              ),
+              child: Icon(icon, color: color, size: 20),
             ),
             const Spacer(),
             Text(
@@ -216,11 +204,7 @@ class _ListTileCard extends StatelessWidget {
               CircleAvatar(
                 radius: 16,
                 backgroundColor: const Color(0xFFF3F4F6),
-                child: Icon(
-                  icon,
-                  size: 18,
-                  color: const Color(0xFF4B5563),
-                ),
+                child: Icon(icon, size: 18, color: const Color(0xFF4B5563)),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -245,11 +229,7 @@ class _ListTileCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: Color(0xFF9CA3AF),
-              ),
+              const Icon(Icons.chevron_right, size: 20, color: Color(0xFF9CA3AF)),
             ],
           ),
         ),

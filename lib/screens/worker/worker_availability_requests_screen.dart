@@ -17,9 +17,7 @@ class WorkerAvailabilityRequestsScreen extends StatelessWidget {
     if (user == null) {
       return const Scaffold(
         body: Center(
-          child: Text(
-            'Debes iniciar sesión como trabajador para ver tus solicitudes.',
-          ),
+          child: Text('Debes iniciar sesión para ver tus solicitudes.'),
         ),
       );
     }
@@ -42,22 +40,17 @@ class WorkerAvailabilityRequestsScreen extends StatelessWidget {
       body: StreamBuilder<List<Evento>>(
         stream: FirestoreService.instance.listenEventos(empresaId),
         builder: (context, eventosSnap) {
-          if (eventosSnap.connectionState == ConnectionState.waiting &&
-              !eventosSnap.hasData) {
+          if (eventosSnap.connectionState == ConnectionState.waiting && !eventosSnap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
           final eventos = eventosSnap.data ?? [];
-          final mapaEventos = {
-            for (final e in eventos) e.id: e,
-          };
+          final mapaEventos = {for (final e in eventos) e.id: e};
 
           return StreamBuilder<List<DisponibilidadEvento>>(
-            stream: FirestoreService.instance
-                .listenSolicitudesDisponibilidadTrabajador(trabajadorId),
+            stream: FirestoreService.instance.listenSolicitudesDisponibilidadTrabajador(trabajadorId),
             builder: (context, dispoSnap) {
-              if (dispoSnap.connectionState == ConnectionState.waiting &&
-                  !dispoSnap.hasData) {
+              if (dispoSnap.connectionState == ConnectionState.waiting && !dispoSnap.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
 
@@ -66,106 +59,84 @@ class WorkerAvailabilityRequestsScreen extends StatelessWidget {
               if (solicitudes.isEmpty) {
                 return const Center(
                   child: Text(
-                    'De momento no tienes solicitudes de disponibilidad.\n'
-                    'Cuando tu empresa te envíe una, aparecerá aquí.',
+                    'No tienes solicitudes pendientes.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFF6B7280),
-                    ),
+                    style: TextStyle(color: Color(0xFF6B7280)),
                   ),
                 );
               }
 
-              // Ordenamos: pendientes primero, luego aceptadas, luego rechazadas
+              // Ordenar: pendientes primero
               solicitudes.sort((a, b) {
                 const orden = {'pendiente': 0, 'aceptado': 1, 'rechazado': 2};
-                final oa = orden[a.estado] ?? 99;
-                final ob = orden[b.estado] ?? 99;
-                if (oa != ob) return oa.compareTo(ob);
-                return a.creadoEn.compareTo(b.creadoEn);
+                return (orden[a.estado] ?? 99).compareTo(orden[b.estado] ?? 99);
               });
 
               return ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                padding: const EdgeInsets.all(16),
                 itemCount: solicitudes.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final d = solicitudes[index];
                   final evento = mapaEventos[d.eventoId];
-
-                  final tituloEvento = evento?.nombre ?? 'Evento ${d.eventoId}';
-                  final fecha =
-                      evento != null ? _formatFechaCorta(evento.fechaInicio) : '';
+                  final tituloEvento = evento?.nombre ?? 'Evento desconocido';
+                  final fecha = evento != null ? _formatFechaCorta(evento.fechaInicio) : '';
 
                   return Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Cabecera: nombre evento + fecha
                           Row(
                             children: [
                               Expanded(
                                 child: Text(
                                   tituloEvento,
-                                  style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                                 ),
                               ),
                               if (fecha.isNotEmpty)
-                                Text(
-                                  fecha,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
+                                Text(fecha, style: const TextStyle(fontSize: 12, color: Colors.grey)),
                             ],
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Empresa: $empresaId',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Color(0xFF9CA3AF),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-
+                          const SizedBox(height: 12),
                           Row(
                             children: [
-                              _EstadoDisponibilidadChip(
-                                estado: d.estado,
-                                asignado: d.asignado,
-                              ),
+                              _EstadoDisponibilidadChip(estado: d.estado, asignado: d.asignado),
                               const Spacer(),
                               if (d.estado == 'pendiente') ...[
+                                // BOTÓN RECHAZAR: Solo funcional si no está asignado
                                 TextButton(
-                                  onPressed: () async {
-                                    await FirestoreService.instance
-                                        .actualizarEstadoDisponibilidad(
-                                      empresaId: empresaId,
-                                      eventoId: d.eventoId,
-                                      disponibilidadId: d.id,
-                                      nuevoEstado: 'rechazado',
-                                    );
-                                  },
-                                  child: const Text(
+                                  onPressed: d.asignado 
+                                    ? null 
+                                    : () async {
+                                        final confirmed = await _mostrarDialogoConfirmacion(context);
+                                        if (confirmed == true) {
+                                          await FirestoreService.instance.actualizarEstadoDisponibilidad(
+                                            empresaId: empresaId,
+                                            eventoId: d.eventoId,
+                                            disponibilidadId: d.id,
+                                            nuevoEstado: 'rechazado',
+                                          );
+                                        }
+                                      },
+                                  child: Text(
                                     'Rechazar',
-                                    style: TextStyle(color: Color(0xFFB91C1C)),
+                                    style: TextStyle(
+                                      color: d.asignado ? Colors.grey : const Color(0xFFB91C1C),
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 4),
+                                const SizedBox(width: 8),
                                 ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF6366F1),
+                                    foregroundColor: Colors.white,
+                                  ),
                                   onPressed: () async {
-                                    await FirestoreService.instance
-                                        .actualizarEstadoDisponibilidad(
+                                    await FirestoreService.instance.actualizarEstadoDisponibilidad(
                                       empresaId: empresaId,
                                       eventoId: d.eventoId,
                                       disponibilidadId: d.id,
@@ -175,22 +146,10 @@ class WorkerAvailabilityRequestsScreen extends StatelessWidget {
                                   child: const Text('Aceptar'),
                                 ),
                               ],
-                              if (d.estado == 'aceptado' && !d.asignado)
-                                const Text(
-                                  'Pendiente de asignación',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF6B7280),
-                                  ),
-                                ),
                               if (d.asignado)
                                 const Text(
                                   'ASIGNADO',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF1D4ED8),
-                                  ),
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo),
                                 ),
                             ],
                           ),
@@ -206,69 +165,55 @@ class WorkerAvailabilityRequestsScreen extends StatelessWidget {
       ),
     );
   }
-}
 
-class _EstadoDisponibilidadChip extends StatelessWidget {
-  final String estado;
-  final bool asignado;
-
-  const _EstadoDisponibilidadChip({
-    required this.estado,
-    required this.asignado,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color bg;
-    Color fg;
-    String label = estado;
-
-    switch (estado) {
-      case 'aceptado':
-        bg = const Color(0xFFDCFCE7);
-        fg = const Color(0xFF15803D);
-        label = 'Disponible';
-        break;
-      case 'rechazado':
-        bg = const Color(0xFFFEF2F2);
-        fg = const Color(0xFFB91C1C);
-        label = 'No disponible';
-        break;
-      case 'pendiente':
-      default:
-        bg = const Color(0xFFE5E7EB);
-        fg = const Color(0xFF4B5563);
-        label = 'Pendiente';
-        break;
-    }
-
-    if (asignado) {
-      bg = const Color(0xFFDBEAFE);
-      fg = const Color(0xFF1D4ED8);
-      label = 'Asignado';
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: fg,
-        ),
+  Future<bool?> _mostrarDialogoConfirmacion(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Rechazar solicitud"),
+        content: const Text("¿Estás seguro de que no estás disponible para este evento?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("CANCELAR")),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("RECHAZAR")),
+        ],
       ),
     );
   }
 }
 
+class _EstadoDisponibilidadChip extends StatelessWidget {
+  final String estado;
+  final bool asignado;
+  const _EstadoDisponibilidadChip({required this.estado, required this.asignado});
+
+  @override
+  Widget build(BuildContext context) {
+    Color bg = const Color(0xFFE5E7EB);
+    Color fg = const Color(0xFF4B5563);
+    String label = 'Pendiente';
+
+    if (asignado) {
+      bg = const Color(0xFFDBEAFE);
+      fg = const Color(0xFF1D4ED8);
+      label = 'Asignado';
+    } else if (estado == 'aceptado') {
+      bg = const Color(0xFFDCFCE7);
+      fg = const Color(0xFF15803D);
+      label = 'Disponible';
+    } else if (estado == 'rechazado') {
+      bg = const Color(0xFFFEF2F2);
+      fg = const Color(0xFFB91C1C);
+      label = 'No disponible';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+      child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: fg)),
+    );
+  }
+}
+
 String _formatFechaCorta(DateTime d) {
-  final dia = d.day.toString().padLeft(2, '0');
-  final mes = d.month.toString().padLeft(2, '0');
-  final year = d.year.toString();
-  return '$dia/$mes/$year';
+  return "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
 }

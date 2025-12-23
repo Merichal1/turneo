@@ -1,460 +1,261 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import '../../models/empresa.dart';
 import '../../models/evento.dart';
 import '../../models/trabajador.dart';
-import '../../models/asignacion_evento.dart';
-import '../../models/disponibilidad.dart';
 import '../../models/disponibilidad_evento.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class FirestoreService {
   FirestoreService._();
-
   static final FirestoreService instance = FirestoreService._();
-
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   // ==========================
-  // RUTAS BÁSICAS
+  // REFERENCIAS BASE
   // ==========================
+  
+  CollectionReference<Map<String, dynamic>> get empresasRef => _db.collection('empresas');
 
-  CollectionReference<Map<String, dynamic>> get empresasRef =>
-      _db.collection('empresas');
+  DocumentReference<Map<String, dynamic>> empresaDoc(String empresaId) => empresasRef.doc(empresaId);
 
-  DocumentReference<Map<String, dynamic>> empresaDoc(String empresaId) =>
-      empresasRef.doc(empresaId);
-
-  CollectionReference<Map<String, dynamic>> eventosRef(String empresaId) =>
-      empresaDoc(empresaId).collection('eventos');
-
-  DocumentReference<Map<String, dynamic>> eventoDoc(
-    String empresaId,
-    String eventoId,
-  ) =>
-      eventosRef(empresaId).doc(eventoId);
-
-  CollectionReference<Map<String, dynamic>> asignacionesRef(
-    String empresaId,
-    String eventoId,
-  ) =>
-      eventoDoc(empresaId, eventoId).collection('asignaciones');
-
-  CollectionReference<Map<String, dynamic>> trabajadoresRef(
-    String empresaId,
-  ) =>
-      empresaDoc(empresaId).collection('trabajadores');
-
-  DocumentReference<Map<String, dynamic>> trabajadorDoc(
-    String empresaId,
-    String trabajadorId,
-  ) =>
-      trabajadoresRef(empresaId).doc(trabajadorId);
-
-  CollectionReference<Map<String, dynamic>> disponibilidadRef(
-    String empresaId,
-    String trabajadorId,
-  ) =>
-      trabajadorDoc(empresaId, trabajadorId).collection('disponibilidad');
-
-  CollectionReference<Map<String, dynamic>> notificacionesRef(
-    String empresaId,
-  ) =>
+  CollectionReference<Map<String, dynamic>> notificacionesRef(String empresaId) =>
       empresaDoc(empresaId).collection('notificaciones');
-
-  CollectionReference<Map<String, dynamic>> mensajesRef(
-    String empresaId,
-  ) =>
-      empresaDoc(empresaId).collection('mensajes');
-
-  CollectionReference<Map<String, dynamic>> itemsMensajeRef(
-    String empresaId,
-    String hiloId,
-  ) =>
-      mensajesRef(empresaId).doc(hiloId).collection('items');
-
-  CollectionReference<Map<String, dynamic>> pagosRef(
-    String empresaId,
-  ) =>
-      empresaDoc(empresaId).collection('pagos');
-
-  // ==========================
-  // EMPRESAS
-  // ==========================
-
-  Future<Empresa?> getEmpresa(String empresaId) async {
-    final doc = await empresaDoc(empresaId).get();
-    if (!doc.exists) return null;
-    return Empresa.fromFirestore(doc);
-  }
-
-  Stream<Empresa?> listenEmpresa(String empresaId) {
-    return empresaDoc(empresaId).snapshots().map((doc) {
-      if (!doc.exists) return null;
-      return Empresa.fromFirestore(doc);
-    });
-  }
-
-  Future<void> upsertEmpresa(Empresa empresa) async {
-    await empresaDoc(empresa.id).set(empresa.toMap(), SetOptions(merge: true));
-  }
 
   // ==========================
   // EVENTOS
   // ==========================
 
-  Stream<List<Evento>> listenEventos(String empresaId, {String? estado}) {
-    Query<Map<String, dynamic>> q = eventosRef(empresaId);
-
-    if (estado != null) {
-      q = q.where('estado', isEqualTo: estado);
-    }
-
-    return q.orderBy('fechaInicio', descending: false).snapshots().map(
-      (snap) {
-        return snap.docs.map((d) => Evento.fromFirestore(d)).toList();
-      },
-    );
+  Stream<List<Evento>> listenEventos(String empresaId) {
+    return empresaDoc(empresaId)
+        .collection('eventos')
+        .orderBy('fechaInicio', descending: false)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => Evento.fromFirestore(d)).toList());
   }
 
-  Future<String> crearEvento(String empresaId, Evento evento) async {
-    final ref = await eventosRef(empresaId).add(evento.toMap());
-    return ref.id;
+  // NUEVO: Escucha notificaciones recientes de la empresa
+  // NUEVO: Método optimizado en FirestoreService
+Stream<List<Map<String, dynamic>>> listenNotificacionesRecientes(String empresaId) {
+  return empresaDoc(empresaId)
+      .collection('notificaciones')
+      .orderBy('creadoEn', descending: true)
+      .limit(8)
+      .snapshots()
+      .map((snap) => snap.docs.map((doc) => {
+        'id': doc.id,
+        ...doc.data(),
+      }).toList());
+}
+
+  // ... (Resto del código existente se mantiene igual)
+  Future<void> crearEvento(String empresaId, Evento evento) async {
+    await empresaDoc(empresaId).collection('eventos').add(evento.toMap());
   }
 
   Future<void> actualizarEvento(String empresaId, Evento evento) async {
-    await eventoDoc(empresaId, evento.id).set(
-      evento.toMap(),
-      SetOptions(merge: true),
-    );
+    await empresaDoc(empresaId)
+        .collection('eventos')
+        .doc(evento.id)
+        .set(evento.toMap(), SetOptions(merge: true));
   }
 
   Future<void> borrarEvento(String empresaId, String eventoId) async {
-    await eventoDoc(empresaId, eventoId).delete();
-  }
-
-    // ==========================
-  // TRABAJADORES
-  // ==========================
-
-  Stream<List<Trabajador>> listenTrabajadores(
-    String empresaId, {
-    bool? soloActivos,
-  }) {
-    Query<Map<String, dynamic>> q = trabajadoresRef(empresaId);
-
-    if (soloActivos == true) {
-      q = q.where('activo', isEqualTo: true);
-    }
-
-    return q.orderBy('nombre_lower').snapshots().map(
-      (snap) {
-        return snap.docs.map((d) => Trabajador.fromFirestore(d)).toList();
-      },
-    );
-  }
-
-  Future<String> crearTrabajador(String empresaId, Trabajador t) async {
-    final ref = await trabajadoresRef(empresaId).add(t.toMap());
-    return ref.id;
-  }
-
-  Future<void> actualizarTrabajador(String empresaId, Trabajador t) async {
-    await trabajadorDoc(empresaId, t.id).set(
-      t.toMap(),
-      SetOptions(merge: true),
-    );
-  }
-
-  Future<void> borrarTrabajador(String empresaId, String trabajadorId) async {
-    await trabajadorDoc(empresaId, trabajadorId).delete();
-  }
-
-  /// 🔹 NUEVO: obtener el ID de trabajador (documento) a partir del UID de auth
-  Future<String?> getTrabajadorIdPorUid(
-    String empresaId,
-    String authUid,
-  ) async {
-    final snap = await trabajadoresRef(empresaId)
-        .where('authUid', isEqualTo: authUid)
-        .limit(1)
-        .get();
-
-    if (snap.docs.isEmpty) return null;
-    return snap.docs.first.id;
-  }
-
-  // ==========================
-  // ASIGNACIONES DE EVENTO
-  // ==========================
-
-  Stream<List<AsignacionEvento>> listenAsignacionesEvento(
-    String empresaId,
-    String eventoId,
-  ) {
-    return asignacionesRef(empresaId, eventoId)
-        .orderBy('actualizadoEn', descending: true)
-        .snapshots()
-        .map(
-      (snap) {
-        return snap.docs.map((d) => AsignacionEvento.fromFirestore(d)).toList();
-      },
-    );
-  }
-
-  Future<String> crearAsignacion(
-    String empresaId,
-    String eventoId,
-    AsignacionEvento asignacion,
-  ) async {
-    final ref = await asignacionesRef(empresaId, eventoId).add(
-      asignacion.toMap(),
-    );
-    return ref.id;
-  }
-
-  Future<void> actualizarAsignacion(
-    String empresaId,
-    String eventoId,
-    AsignacionEvento asignacion,
-  ) async {
-    await asignacionesRef(empresaId, eventoId)
-        .doc(asignacion.id)
-        .set(asignacion.toMap(), SetOptions(merge: true));
-  }
-
-  Future<void> borrarAsignacion(
-    String empresaId,
-    String eventoId,
-    String asignacionId,
-  ) async {
-    await asignacionesRef(empresaId, eventoId).doc(asignacionId).delete();
-  }
-
-  // ==========================
-  // DISPONIBILIDAD TRABAJADOR (CALENDARIO PROPIO)
-  // ==========================
-
-  Stream<List<Disponibilidad>> listenDisponibilidadTrabajador(
-    String empresaId,
-    String trabajadorId,
-  ) {
-    return disponibilidadRef(empresaId, trabajadorId)
-        .orderBy('actualizadoEn', descending: true)
-        .snapshots()
-        .map(
-      (snap) {
-        return snap.docs.map((d) => Disponibilidad.fromFirestore(d)).toList();
-      },
-    );
-  }
-
-  Future<void> setDisponibilidadDia({
-    required String empresaId,
-    required String trabajadorId,
-    required String fechaId, // "2025-12-04"
-    required bool disponible,
-    String? nota,
-    DateTime? actualizadoEn,
-  }) async {
-    await disponibilidadRef(empresaId, trabajadorId).doc(fechaId).set(
-      {
-        'disponible': disponible,
-        'nota': nota,
-        'actualizadoEn':
-            Timestamp.fromDate(actualizadoEn ?? DateTime.now()),
-      },
-      SetOptions(merge: true),
-    );
-  }
-
-  // ==========================
-  // DISPONIBILIDAD POR EVENTO
-  // ==========================
-
-  /// Escucha las solicitudes de disponibilidad de un evento concreto
-  Stream<List<DisponibilidadEvento>> listenDisponibilidadEvento(
-    String empresaId,
-    String eventoId,
-  ) {
-    return _db
-        .collection('empresas')
-        .doc(empresaId)
+    await empresaDoc(empresaId)
         .collection('eventos')
         .doc(eventoId)
-        .collection('disponibilidad')
-        .orderBy('creadoEn', descending: false)
+        .delete();
+  }
+
+  Stream<List<Trabajador>> listenTrabajadores(String empresaId) {
+    return empresaDoc(empresaId)
+        .collection('trabajadores')
+        .orderBy('nombre_lower')
         .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map(
-                (d) => DisponibilidadEvento.fromFirestore(d),
-              )
-              .toList(),
-        );
+        .map((snap) => snap.docs.map((d) => Trabajador.fromFirestore(d)).toList());
   }
 
-  /// Crea solicitudes de disponibilidad para un evento a varios trabajadores
-// FirestoreService.dart
-
-Future<void> crearSolicitudesDisponibilidadParaEvento({
-  required String empresaId,
-  required String eventoId,
-  required List<Trabajador> trabajadores,
-}) async {
-  final batch = _db.batch();
-
-  // Mismo timestamp para todo el envío
-  final now = DateTime.now();
-
-  final dispoColl = _db
-      .collection('empresas')
-      .doc(empresaId)
-      .collection('eventos')
-      .doc(eventoId)
-      .collection('disponibilidad');
-
-  for (final t in trabajadores) {
-    final docRef = dispoColl.doc(t.id);
-
-    batch.set(
-      docRef,
-      {
-        'eventoId': eventoId,
-        'trabajadorId': t.id,
-        'trabajadorNombre':
-            '${t.nombre ?? ''} ${t.apellidos ?? ''}'.trim(),
-        'trabajadorRol': t.puesto ?? '',
-        // lo usaremos para el email:
-        'trabajadorEmail': t.correo ?? '',
-        'estado': 'pendiente', // pendiente | aceptado | rechazado
-        'asignado': false,
-        'creadoEn': Timestamp.fromDate(now),
-        'respondidoEn': null,
-      },
-      SetOptions(merge: true),
-    );
-  }
-
-  await batch.commit();
-}
-
-  /// Actualiza el estado de una solicitud (aceptado / rechazado / pendiente)
-  Future<void> actualizarEstadoDisponibilidad({
+  Future<void> crearSolicitudesDisponibilidadParaEvento({
     required String empresaId,
     required String eventoId,
-    required String disponibilidadId,
-    required String nuevoEstado, // 'aceptado' | 'rechazado' | 'pendiente'
+    required List<Trabajador> trabajadores,
   }) async {
-    await _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('disponibilidad')
-        .doc(disponibilidadId)
-        .update({
-      'estado': nuevoEstado,
-      'respondidoEn': Timestamp.fromDate(DateTime.now()),
-    });
+    final batch = _db.batch();
+    final now = DateTime.now();
+    final dispoColl = empresaDoc(empresaId).collection('eventos').doc(eventoId).collection('disponibilidad');
+
+    for (final t in trabajadores) {
+      batch.set(dispoColl.doc(t.id), {
+        'eventoId': eventoId,
+        'trabajadorId': t.id,
+        'trabajadorNombre': '${t.nombre} ${t.apellidos}'.trim(),
+        'trabajadorRol': t.puesto ?? '',
+        'estado': 'pendiente', 
+        'asignado': false,
+        'creadoEn': Timestamp.fromDate(now),
+      }, SetOptions(merge: true));
+    }
+    await batch.commit();
   }
 
-  /// Marca a un trabajador como asignado/no asignado a un evento
+  Stream<List<DisponibilidadEvento>> listenDisponibilidadEvento(String empresaId, String eventoId) {
+    return empresaDoc(empresaId).collection('eventos').doc(eventoId).collection('disponibilidad')
+        .orderBy('creadoEn', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => DisponibilidadEvento.fromFirestore(d)).toList());
+  }
+
   Future<void> marcarTrabajadorAsignado({
     required String empresaId,
     required String eventoId,
     required String disponibilidadId,
     required bool asignado,
   }) async {
-    await _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('disponibilidad')
-        .doc(disponibilidadId)
-        .update({
-      'asignado': asignado,
-    });
+    await empresaDoc(empresaId).collection('eventos').doc(eventoId).collection('disponibilidad')
+        .doc(disponibilidadId).update({'asignado': asignado});
   }
 
-  /// 🔍 Todas las solicitudes de disponibilidad (de todos los eventos)
-  /// para un trabajador concreto (usado en la app del trabajador)
-  Stream<List<DisponibilidadEvento>> listenSolicitudesDisponibilidadTrabajador(
-    String trabajadorId,
-  ) {
-    return _db
-        .collectionGroup('disponibilidad')
+  Stream<List<DisponibilidadEvento>> listenSolicitudesDisponibilidadTrabajador(String trabajadorId) {
+    return _db.collectionGroup('disponibilidad')
         .where('trabajadorId', isEqualTo: trabajadorId)
         .orderBy('creadoEn', descending: true)
         .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map((d) => DisponibilidadEvento.fromFirestore(d))
-              .toList(),
-        );
-  }
-    /// Busca una empresa por su código de licencia
-  Future<String?> buscarEmpresaPorCodigoLicencia(String codigo) async {
-    final snap = await _db
-        .collection('empresas')
-        .where('codigoLicencia', isEqualTo: codigo)
-        .limit(1)
-        .get();
-
-    if (snap.docs.isEmpty) return null;
-    return snap.docs.first.id; // empresaId
+        .map((snap) => snap.docs.map((d) => DisponibilidadEvento.fromFirestore(d)).toList());
   }
 
-  /// Crea automáticamente el trabajador dentro de la empresa
-  Future<void> crearTrabajadorDesdeRegistro({
-    required String codigoLicencia,
-    required User user, // usuario de FirebaseAuth
-    required String nombre,
-    required String apellidos,
-    required String ciudad,
-    required String telefono,
-    String? puesto,
-    int? aniosExperiencia,
-    bool tieneVehiculo = false,
+  Future<void> actualizarEstadoDisponibilidad({
+    required String empresaId,
+    required String eventoId,
+    required String disponibilidadId,
+    required String nuevoEstado,
   }) async {
-    // 1) Buscar empresa por código
-    final empresaId = await buscarEmpresaPorCodigoLicencia(codigoLicencia);
-    if (empresaId == null) {
-      throw Exception('Código de empresa no válido');
-    }
-
-    final ahora = DateTime.now();
-
-    // 2) Crear documento en empresas/{empresaId}/trabajadores/{uid}
-    await _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('trabajadores')
-        .doc(user.uid) // usamos el UID como id de trabajador
-        .set({
-      'authUid': user.uid,
-      'empresaId': empresaId,
-      'activo': true,
-      'creadoEn': Timestamp.fromDate(ahora),
-
-      // campos para búsquedas/ordenaciones
-      'ciudad_lower': ciudad.toLowerCase(),
-      'nombre_lower': '${nombre.toLowerCase()} ${apellidos.toLowerCase()}',
-
-      'perfil': {
-        'nombre': nombre,
-        'apellidos': apellidos,
-        'ciudad': ciudad,
-        'correo': user.email,
-        'telefono': telefono,
-      },
-      'laboral': {
-        'puesto': puesto ?? '',
-        'añosExperiencia': aniosExperiencia ?? 0,
-        'tieneVehiculo': tieneVehiculo,
-      },
+    await empresaDoc(empresaId).collection('eventos').doc(eventoId).collection('disponibilidad')
+        .doc(disponibilidadId).update({
+      'estado': nuevoEstado,
+      'respondidoEn': FieldValue.serverTimestamp(),
     });
   }
 
+  /// ✅ Guardar/quitar NO DISPONIBLE (normalizando a "solo día")
+  Future<void> setDiaNoDisponible(
+    String empresaId,
+    String trabajadorDocId,
+    DateTime fecha,
+    bool esIndisponible,
+  ) async {
+    final day = DateTime(fecha.year, fecha.month, fecha.day);
+    final fechaId =
+        "${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}";
+
+    final ref = empresaDoc(empresaId)
+        .collection('trabajadores')
+        .doc(trabajadorDocId)
+        .collection('indisponibilidad')
+        .doc(fechaId);
+
+    if (esIndisponible) {
+      await ref.set({'fecha': Timestamp.fromDate(day)});
+    } else {
+      await ref.delete();
+    }
+  }
+
+  /// ✅ Comprueba NO DISPONIBLE aunque el docId no coincida (por campo fecha)
+  Future<bool> verificarIndisponibilidad(
+    String empresaId,
+    String trabajadorDocId,
+    DateTime fecha,
+  ) async {
+    final dayStart = DateTime(fecha.year, fecha.month, fecha.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    final col = empresaDoc(empresaId)
+        .collection('trabajadores')
+        .doc(trabajadorDocId)
+        .collection('indisponibilidad');
+
+    // 1) rápido por ID si usas YYYY-MM-DD
+    final fechaId =
+        "${dayStart.year}-${dayStart.month.toString().padLeft(2, '0')}-${dayStart.day.toString().padLeft(2, '0')}";
+    final byId = await col.doc(fechaId).get();
+    if (byId.exists) return true;
+
+    // 2) fallback por campo fecha
+    final q = await col
+        .where('fecha', isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart))
+        .where('fecha', isLessThan: Timestamp.fromDate(dayEnd))
+        .limit(1)
+        .get();
+
+    return q.docs.isNotEmpty;
+  }
+
+    /// ✅ Devuelve el docId REAL del trabajador dentro de /trabajadores
+  /// Si tu docId ya es el uid -> perfecto
+  /// Si no -> intenta por campos uid/userId/authUid/email
+  Future<String> resolveTrabajadorDocId(
+    String empresaId, {
+    required String uid,
+    String? email,
+  }) async {
+    final col = empresaDoc(empresaId).collection('trabajadores');
+
+    // 1) docId == uid (ideal)
+    final byId = await col.doc(uid).get();
+    if (byId.exists) return uid;
+
+    // 2) uid field
+    final q1 = await col.where('uid', isEqualTo: uid).limit(1).get();
+    if (q1.docs.isNotEmpty) return q1.docs.first.id;
+
+    // 3) userId field
+    final q2 = await col.where('userId', isEqualTo: uid).limit(1).get();
+    if (q2.docs.isNotEmpty) return q2.docs.first.id;
+
+    // 4) authUid field
+    final q3 = await col.where('authUid', isEqualTo: uid).limit(1).get();
+    if (q3.docs.isNotEmpty) return q3.docs.first.id;
+
+    // 5) email field
+    if (email != null && email.isNotEmpty) {
+      final q4 = await col.where('email', isEqualTo: email).limit(1).get();
+      if (q4.docs.isNotEmpty) return q4.docs.first.id;
+    }
+
+    // fallback
+    return uid;
+  }
+
+  /// ✅ Stream de días NO disponibles del trabajador
+  Stream<List<DateTime>> listenIndisponibilidadTrabajador(
+    String empresaId,
+    String trabajadorDocId,
+  ) {
+    return empresaDoc(empresaId)
+        .collection('trabajadores')
+        .doc(trabajadorDocId)
+        .collection('indisponibilidad')
+        .snapshots()
+        .map((snap) {
+      return snap.docs.map((doc) {
+        final data = doc.data();
+        final raw = data['fecha'];
+
+        if (raw is Timestamp) {
+          final d = raw.toDate();
+          return DateTime(d.year, d.month, d.day);
+        }
+
+        // fallback por doc.id "YYYY-MM-DD"
+        final parts = doc.id.split('-');
+        if (parts.length == 3) {
+          final y = int.tryParse(parts[0]) ?? 1970;
+          final m = int.tryParse(parts[1]) ?? 1;
+          final day = int.tryParse(parts[2]) ?? 1;
+          return DateTime(y, m, day);
+        }
+
+        return DateTime.now();
+      }).toList();
+    });
+  }
+
+  
 }

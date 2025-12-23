@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:turneo/auth_ui/constants.dart';
-
 import '../../../components/already_have_an_account_acheck.dart';
 import '../../Login/login_screen.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../screens/worker/worker_home_screen.dart';
+import '../../../../screens/admin/admin_home_screen.dart';
 
 class SignUpForm extends StatefulWidget {
-  const SignUpForm({
-    Key? key,
-  }) : super(key: key);
+  const SignUpForm({Key? key}) : super(key: key);
 
   @override
   State<SignUpForm> createState() => _SignUpFormState();
@@ -30,6 +28,7 @@ class _SignUpFormState extends State<SignUpForm> {
   final _licenciaController = TextEditingController();
 
   String _puesto = 'camarero';
+  String _rol = 'worker'; 
   bool _tieneVehiculo = false;
   bool _isLoading = false;
   String? _error;
@@ -61,7 +60,8 @@ class _SignUpFormState extends State<SignUpForm> {
       final edad = int.tryParse(_edadController.text.trim()) ?? 0;
       final aniosExp = int.tryParse(_aniosExpController.text.trim()) ?? 0;
 
-      await AuthService.instance.registerWorker(
+      // Usamos el método unificado que creamos en AuthService
+      await AuthService.instance.registerUser(
         email: _emailController.text,
         password: _passwordController.text,
         nombre: _nombreController.text.trim(),
@@ -69,29 +69,30 @@ class _SignUpFormState extends State<SignUpForm> {
         telefono: _telefonoController.text.trim(),
         ciudad: _ciudadController.text.trim(),
         dni: _dniController.text.trim(),
-        puesto: _puesto,
+        puesto: _rol == 'admin' ? 'administrador' : _puesto,
         edad: edad,
         aniosExperiencia: aniosExp,
         tieneVehiculo: _tieneVehiculo,
         licencia: _licenciaController.text.trim(),
+        role: _rol, 
       );
 
       if (!mounted) return;
 
-      // Vamos a la home del trabajador
+      // Navegación según el rol seleccionado
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const WorkerHomeScreen()),
+        MaterialPageRoute(
+          builder: (_) => _rol == 'admin' 
+              ? const AdminHomeScreen() 
+              : const WorkerHomeScreen(),
+        ),
         (route) => false,
       );
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
+      setState(() => _error = e.toString());
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -99,238 +100,110 @@ class _SignUpFormState extends State<SignUpForm> {
   Widget build(BuildContext context) {
     return Form(
       key: _formKey,
-      child: Column(
-        children: [
-          if (_error != null) ...[
-            Text(
-              _error!,
-              style: const TextStyle(color: Colors.red, fontSize: 12),
+      child: SingleChildScrollView( // Añadido para evitar error de overflow al abrir teclado
+        child: Column(
+          children: [
+            if (_error != null) ...[
+              Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+              const SizedBox(height: defaultPadding / 2),
+            ],
+            // SELECCIÓN DE ROL
+            DropdownButtonFormField<String>(
+              value: _rol,
+              decoration: const InputDecoration(
+                labelText: "Tipo de Usuario",
+                prefixIcon: Icon(Icons.manage_accounts),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'worker', child: Text('Trabajador')),
+                DropdownMenuItem(value: 'admin', child: Text('Administrador')),
+              ],
+              onChanged: (v) => setState(() => _rol = v!),
+            ),
+            const SizedBox(height: defaultPadding),
+            TextFormField(
+              controller: _nombreController,
+              decoration: const InputDecoration(hintText: "Nombre", prefixIcon: Icon(Icons.person)),
+              validator: (v) => v == null || v.isEmpty ? "Obligatorio" : null,
             ),
             const SizedBox(height: defaultPadding / 2),
-          ],
-          // Nombre
-          TextFormField(
-            controller: _nombreController,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Nombre",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.person),
-              ),
+            TextFormField(
+              controller: _apellidosController,
+              decoration: const InputDecoration(hintText: "Apellidos", prefixIcon: Icon(Icons.person_outline)),
+              validator: (v) => v == null || v.isEmpty ? "Obligatorio" : null,
             ),
-            validator: (v) =>
-                v == null || v.trim().isEmpty ? "Campo obligatorio" : null,
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Apellidos
-          TextFormField(
-            controller: _apellidosController,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Apellidos",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.person_outline),
-              ),
+            const SizedBox(height: defaultPadding / 2),
+            TextFormField(
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(hintText: "Email", prefixIcon: Icon(Icons.email)),
+              validator: (v) => v != null && v.contains('@') ? null : "Email no válido",
             ),
-            validator: (v) =>
-                v == null || v.trim().isEmpty ? "Campo obligatorio" : null,
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Email
-          TextFormField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Correo electrónico",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.alternate_email),
-              ),
-            ),
-            validator: (v) {
-              if (v == null || v.trim().isEmpty) {
-                return "El correo es obligatorio";
-              }
-              if (!v.contains('@')) return "Correo no válido";
-              return null;
-            },
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Teléfono
-          TextFormField(
-            controller: _telefonoController,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Teléfono",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.phone),
-              ),
-            ),
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Ciudad
-          TextFormField(
-            controller: _ciudadController,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Ciudad",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.location_city),
-              ),
-            ),
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // DNI
-          TextFormField(
-            controller: _dniController,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "DNI",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.badge),
-              ),
-            ),
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Puesto + Edad
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _puesto,
-                  decoration: const InputDecoration(
-                    hintText: 'Puesto',
+            const SizedBox(height: defaultPadding / 2),
+            
+            // CAMPOS EXTRA: Solo visibles si es trabajador
+            if (_rol == 'worker') ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _puesto,
+                      decoration: const InputDecoration(labelText: "Puesto"),
+                      items: const [
+                        DropdownMenuItem(value: 'camarero', child: Text('Camarero')),
+                        DropdownMenuItem(value: 'cocinero', child: Text('Cocinero')),
+                        DropdownMenuItem(value: 'logistica', child: Text('Logística')),
+                        DropdownMenuItem(value: 'limpiador', child: Text('Limpiador')),
+                      ],
+                      onChanged: (v) => setState(() => _puesto = v!),
+                    ),
                   ),
-                  items: const [
-                    DropdownMenuItem(
-                        value: 'camarero', child: Text('Camarero')),
-                    DropdownMenuItem(
-                        value: 'cocinero', child: Text('Cocinero')),
-                    DropdownMenuItem(
-                        value: 'logistica', child: Text('Logística')),
-                    DropdownMenuItem(
-                        value: 'limpiador', child: Text('Limpiador')),
-                    DropdownMenuItem(value: 'metre', child: Text('Metre')),
-                    DropdownMenuItem(
-                        value: 'coordinador', child: Text('Coordinador')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _puesto = v);
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextFormField(
-                  controller: _edadController,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.next,
-                  cursorColor: kPrimaryColor,
-                  decoration: const InputDecoration(
-                    hintText: "Edad",
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _edadController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: "Edad"),
+                    ),
                   ),
-                ),
+                ],
+              ),
+              const SizedBox(height: defaultPadding / 2),
+              SwitchListTile(
+                title: const Text("¿Vehículo propio?", style: TextStyle(fontSize: 14)),
+                value: _tieneVehiculo,
+                onChanged: (v) => setState(() => _tieneVehiculo = v),
               ),
             ],
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Años experiencia
-          TextFormField(
-            controller: _aniosExpController,
-            keyboardType: TextInputType.number,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Años de experiencia",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.work_history),
+            
+            const SizedBox(height: defaultPadding / 2),
+            TextFormField(
+              controller: _licenciaController,
+              decoration: const InputDecoration(hintText: "Licencia Empresa", prefixIcon: Icon(Icons.key)),
+              validator: (v) => v == null || v.isEmpty ? "La licencia es obligatoria" : null,
+            ),
+            const SizedBox(height: defaultPadding / 2),
+            TextFormField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(hintText: "Contraseña", prefixIcon: Icon(Icons.lock)),
+              validator: (v) => v != null && v.length >= 6 ? null : "Mínimo 6 caracteres",
+            ),
+            const SizedBox(height: defaultPadding),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _submit,
+                child: Text(_isLoading ? "PROCESANDO..." : "REGISTRARSE"),
               ),
             ),
-          ),
-          const SizedBox(height: defaultPadding / 4),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text("Dispongo de vehículo propio"),
-            value: _tieneVehiculo,
-            onChanged: (v) => setState(() => _tieneVehiculo = v),
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Licencia empresa
-          TextFormField(
-            controller: _licenciaController,
-            textInputAction: TextInputAction.next,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Licencia de la empresa",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.key),
-              ),
+            const SizedBox(height: defaultPadding),
+            AlreadyHaveAnAccountCheck(
+              login: false,
+              press: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LoginScreen())),
             ),
-            validator: (v) =>
-                v == null || v.trim().isEmpty ? "La licencia es obligatoria" : null,
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          // Password
-          TextFormField(
-            controller: _passwordController,
-            textInputAction: TextInputAction.done,
-            obscureText: true,
-            cursorColor: kPrimaryColor,
-            decoration: const InputDecoration(
-              hintText: "Contraseña",
-              prefixIcon: Padding(
-                padding: EdgeInsets.all(defaultPadding),
-                child: Icon(Icons.lock),
-              ),
-            ),
-            validator: (v) {
-              if (v == null || v.length < 6) {
-                return "Mínimo 6 caracteres";
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: defaultPadding / 2),
-          ElevatedButton(
-            onPressed: _isLoading ? null : _submit,
-            child: _isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text("Registrarte".toUpperCase()),
-          ),
-          const SizedBox(height: defaultPadding),
-          AlreadyHaveAnAccountCheck(
-            login: false,
-            press: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) {
-                    return const LoginScreen();
-                  },
-                ),
-              );
-            },
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
