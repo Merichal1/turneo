@@ -4,6 +4,7 @@ import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 import '../../models/disponibilidad_evento.dart';
+import '../../widgets/event_map_card.dart';
 
 class WorkerEventsScreen extends StatefulWidget {
   const WorkerEventsScreen({super.key});
@@ -83,6 +84,7 @@ class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
                     margin: const EdgeInsets.only(bottom: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
+                      onTap: () => _openEventDetails(context, e),
                       contentPadding: const EdgeInsets.all(16),
                       title: Text(e.nombre, style: TextStyle(fontWeight: FontWeight.bold, color: haPasado ? Colors.grey : Colors.black)),
                       subtitle: Column(
@@ -110,6 +112,38 @@ class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
       ),
     );
   }
+}
+
+void _openEventDetails(BuildContext context, Evento e) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).padding.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(e.nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Text('${e.ciudad} · ${e.direccion}', style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 12),
+            EventMapCard(evento: e),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class _FilterButton extends StatelessWidget {

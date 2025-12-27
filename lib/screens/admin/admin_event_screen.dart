@@ -9,6 +9,9 @@ import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 import 'admin_assignment_screen.dart';
 import '../../widgets/place_autocomplete_field.dart';
+import '../../widgets/event_map_card.dart';
+import '../../core/services/places_service.dart'; // arriba del archivo
+
 
 /// ✅ Pon tu key de Places por dart-define:
 /// flutter run --dart-define=GOOGLE_PLACES_API_KEY=TU_KEY
@@ -281,6 +284,7 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
   double? pickedLng = evento?.lng;
 
 
+
   DateTime inicio = evento?.fechaInicio ?? DateTime.now().add(const Duration(days: 1));
   DateTime fin = evento?.fechaFin ?? inicio.add(const Duration(hours: 4));
   String estado = evento?.estado ?? 'activo';
@@ -362,29 +366,41 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                 decoration: const InputDecoration(labelText: "Ciudad", border: OutlineInputBorder()),
               ),
               const SizedBox(height: 12),
-              PlaceAutocompleteField(
-                apiKey: kPlacesApiKey,
-                controller: direccionCtrl,
-                labelText: "Dirección (Google)",
-                hintText: "Escribe y elige una sugerencia…",
-                onPlaceSelected: (sel) {
-                  setMState(() {
-                    direccionCtrl.text = sel.addressText;
-
-                    // Rellena ciudad si viene en el detalle
-                    if ((sel.city ?? '').trim().isNotEmpty) {
-                      ciudadCtrl.text = sel.city!.trim();
-                    }
-
-                    // Guarda coords para el evento
-                    pickedLat = sel.lat;
-                    pickedLng = sel.lng;
-                  });
-                },
+                PlaceAutocompleteField(
+              controller: direccionCtrl,
+              onPlaceSelected: (sel) {
+                setMState(() {
+                  direccionCtrl.text = sel.addressText;
+                  if ((sel.city ?? '').isNotEmpty) ciudadCtrl.text = sel.city!;
+                  pickedLat = sel.lat;
+                  pickedLng = sel.lng;
+                });
+              },
+            ),
+              const SizedBox(height: 12),
+              // ✅ PREVIEW MAPA + BOTÓN ABRIR GOOGLE MAPS
+              EventMapCard(
+                key: ValueKey(
+                  '${pickedLat ?? ''}_${pickedLng ?? ''}_${direccionCtrl.text}_${ciudadCtrl.text}',
+                ),
+                evento: Evento(
+                  id: evento?.id ?? '',
+                  nombre: nombreCtrl.text.trim(),
+                  tipo: tipoCtrl.text.trim(),
+                  fechaInicio: inicio,
+                  fechaFin: fin,
+                  estado: estado,
+                  ciudad: ciudadCtrl.text.trim(),
+                  direccion: direccionCtrl.text.trim(),
+                  rolesRequeridos: const {},
+                  cantidadRequeridaTrabajadores: 0,
+                  creadoPor: evento?.creadoPor ?? 'admin',
+                  creadoEn: evento?.creadoEn ?? DateTime.now(),
+                  lat: pickedLat,
+                  lng: pickedLng,
+                ),
               ),
 
-
-              const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -513,6 +529,36 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                           );
                           return;
                         }
+                        
+
+                        // Si no hay coords pero hay dirección, intentamos geocodificar al guardar
+                        if ((pickedLat == null || pickedLng == null) &&
+                            direccionCtrl.text.trim().isNotEmpty) {
+                          try {
+                            final geo = await PlacesService()
+                                .geocodeAddress(address: '${direccionCtrl.text.trim()}, ${ciudadCtrl.text.trim()}');
+
+                            setMState(() {
+                              pickedLat = geo.lat;
+                              pickedLng = geo.lng;
+                              direccionCtrl.text = geo.formattedAddress ?? direccionCtrl.text;
+                            });
+                          } catch (_) {
+                            // seguimos y caerá en el error de abajo
+                          }
+                        }
+
+                                        if (pickedLat == null || pickedLng == null) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                "Selecciona una sugerencia de Google o escribe una dirección válida para obtener coordenadas.",
+                                              ),
+                                            ),
+                                          );
+                                          return;
+                                        }
+
 
                         final nuevo = Evento(
                           id: evento?.id ?? '',
@@ -528,8 +574,9 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                           creadoPor: evento?.creadoPor ?? 'admin',
                           creadoEn: evento?.creadoEn ?? DateTime.now(),
                           // lat/lng NO los forzamos aquí: el EventMapCard los autogenera y cachea si faltan
-                          lat: evento?.lat,
-                          lng: evento?.lng,
+                          lat: pickedLat,
+                          lng: pickedLng,
+
                         );
 
                         if (isEditing) {

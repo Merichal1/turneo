@@ -1,109 +1,94 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-
-class PlaceSuggestion {
-  final String description;
-  final String placeId;
-  PlaceSuggestion({required this.description, required this.placeId});
-}
-
-class PlaceDetails {
-  final String formattedAddress;
-  final double lat;
-  final double lng;
-  PlaceDetails({
-    required this.formattedAddress,
-    required this.lat,
-    required this.lng,
-  });
-}
+import 'package:cloud_functions/cloud_functions.dart';
 
 class PlacesService {
-  final String apiKey;
-  PlacesService(this.apiKey);
+  final FirebaseFunctions _functions;
 
-  Future<List<PlaceSuggestion>> autocomplete({
+  PlacesService({FirebaseFunctions? functions})
+      : _functions =
+            functions ?? FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  Future<List<PlacePrediction>> autocomplete({
     required String input,
     required String sessionToken,
-    String language = 'es',
-    String? countryCode, // 'es' para España
   }) async {
-    if (apiKey.trim().isEmpty) return [];
-    if (input.trim().isEmpty) return [];
-
-    final params = <String, String>{
+    final callable = _functions.httpsCallable('placesAutocomplete');
+    final res = await callable.call({
       'input': input,
-      'key': apiKey,
-      'sessiontoken': sessionToken,
-      'language': language,
-    };
+      'sessionToken': sessionToken,
+    });
 
-    if (countryCode != null && countryCode.isNotEmpty) {
-      params['components'] = 'country:$countryCode';
-    }
+    final data = res.data as Map;
+    final list = (data['predictions'] as List? ?? []);
 
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/autocomplete/json',
-      params,
-    );
-
-    final res = await http.get(uri);
-    final data = jsonDecode(res.body);
-
-    final status = (data['status'] as String?) ?? '';
-    if (status != 'OK' && status != 'ZERO_RESULTS') {
-      throw Exception(
-        'Places autocomplete error: $status ${data['error_message'] ?? ''}',
-      );
-    }
-
-    final preds = (data['predictions'] as List? ?? const []);
-    return preds.map((p) {
-      return PlaceSuggestion(
-        description: (p['description'] ?? '') as String,
-        placeId: (p['place_id'] ?? '') as String,
-      );
-    }).toList();
+    return list
+        .map((e) => PlacePrediction(
+              placeId: (e['placeId'] ?? '').toString(),
+              description: (e['description'] ?? '').toString(),
+            ))
+        .where((p) => p.placeId.isNotEmpty && p.description.isNotEmpty)
+        .toList();
   }
 
   Future<PlaceDetails> details({
     required String placeId,
     required String sessionToken,
-    String language = 'es',
   }) async {
-    if (apiKey.trim().isEmpty) {
-      throw Exception('GOOGLE_PLACES_API_KEY no configurada');
-    }
+    final callable = _functions.httpsCallable('placesDetails'); // ✅ plural
+    final res = await callable.call({
+      'placeId': placeId,
+      'sessionToken': sessionToken,
+    });
 
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/details/json',
-      {
-        'place_id': placeId,
-        'key': apiKey,
-        'sessiontoken': sessionToken,
-        'language': language,
-        'fields': 'formatted_address,geometry',
-      },
-    );
-
-    final res = await http.get(uri);
-    final data = jsonDecode(res.body);
-
-    final status = (data['status'] as String?) ?? '';
-    if (status != 'OK') {
-      throw Exception(
-        'Places details error: $status ${data['error_message'] ?? ''}',
-      );
-    }
-
-    final result = data['result'] ?? {};
-    final loc = result['geometry']?['location'] ?? {};
+    final d = res.data as Map;
     return PlaceDetails(
-      formattedAddress: (result['formatted_address'] ?? '') as String,
-      lat: (loc['lat'] as num).toDouble(),
-      lng: (loc['lng'] as num).toDouble(),
+      formattedAddress: d['formattedAddress']?.toString(),
+      lat: (d['lat'] is num) ? (d['lat'] as num).toDouble() : null,
+      lng: (d['lng'] is num) ? (d['lng'] as num).toDouble() : null,
+      city: d['city']?.toString(),
     );
   }
+
+  Future<GeocodeResult> geocodeAddress({required String address}) async {
+    final callable = _functions.httpsCallable('geocodeAddress');
+    final res = await callable.call({'address': address});
+
+    final d = res.data as Map;
+    return GeocodeResult(
+      formattedAddress: d['formattedAddress']?.toString(),
+      lat: (d['lat'] as num).toDouble(),
+      lng: (d['lng'] as num).toDouble(),
+    );
+  }
+}
+
+class PlacePrediction {
+  final String placeId;
+  final String description;
+  PlacePrediction({required this.placeId, required this.description});
+}
+
+class PlaceDetails {
+  final String? formattedAddress;
+  final double? lat;
+  final double? lng;
+  final String? city;
+
+  PlaceDetails({
+    required this.formattedAddress,
+    required this.lat,
+    required this.lng,
+    required this.city,
+  });
+}
+
+class GeocodeResult {
+  final String? formattedAddress;
+  final double lat;
+  final double lng;
+
+  GeocodeResult({
+    required this.formattedAddress,
+    required this.lat,
+    required this.lng,
+  });
 }
