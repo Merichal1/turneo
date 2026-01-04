@@ -7,7 +7,6 @@ import '../config/app_config.dart';
 import '../models/evento.dart';
 import '../core/services/places_service.dart';
 
-
 class EventMapCard extends StatefulWidget {
   final Evento evento;
   const EventMapCard({super.key, required this.evento});
@@ -21,7 +20,6 @@ class _EventMapCardState extends State<EventMapCard> {
   bool _loading = false;
   String? _error;
 
-
   String get _address {
     final parts = <String>[];
     if (widget.evento.direccion.trim().isNotEmpty) parts.add(widget.evento.direccion.trim());
@@ -33,59 +31,64 @@ class _EventMapCardState extends State<EventMapCard> {
   void initState() {
     super.initState();
 
-    // 1) si ya hay coords, perfecto
+    // 1) si ya hay coords
     if (widget.evento.lat != null && widget.evento.lng != null) {
       _pos = LatLng(widget.evento.lat!, widget.evento.lng!);
       return;
     }
 
-    // 2) si no hay coords, intentamos geocoding por dirección (sin romper)
+    // 2) si no hay coords, geocode y cache
     _tryGeocodeAndCache();
   }
+
   Future<void> _tryGeocodeAndCache() async {
-  final addr = _address;
-  if (addr.isEmpty) return;
+    final addr = _address;
+    if (addr.isEmpty) return;
 
-  setState(() {
-    _loading = true;
-    _error = null;
-  });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
 
-  try {
-    final geo = await PlacesService().geocodeAddress(address: addr);
-    final pos = LatLng(geo.lat, geo.lng);
+    try {
+      final geo = await PlacesService().geocodeAddress(address: addr);
+      final pos = LatLng(geo.lat, geo.lng);
 
-    // ✅ cache en Firestore para no recalcular siempre
-    if (widget.evento.id.isNotEmpty) {
-      await FirebaseFirestore.instance
-          .collection('empresas')
-          .doc(AppConfig.empresaId)
-          .collection('eventos')
-          .doc(widget.evento.id)
-          .set({
-        'ubicacion': {'lat': geo.lat, 'lng': geo.lng},
-      }, SetOptions(merge: true));
+      // cache Firestore para no recalcular
+      if (widget.evento.id.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('empresas')
+            .doc(AppConfig.empresaId)
+            .collection('eventos')
+            .doc(widget.evento.id)
+            .set({
+          'ubicacion': {'lat': geo.lat, 'lng': geo.lng},
+        }, SetOptions(merge: true));
+      }
+
+      if (!mounted) return;
+      setState(() => _pos = pos);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = "No pude obtener coordenadas automáticamente.");
+    } finally {
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
-
-    if (!mounted) return;
-    setState(() => _pos = pos);
-  } catch (_) {
-    if (!mounted) return;
-    setState(() => _error = "No pude obtener coordenadas automáticamente.");
-  } finally {
-    if (!mounted) return;
-    setState(() => _loading = false);
   }
-}
 
   Future<void> _openInGoogleMaps() async {
     final addr = _address;
 
     final Uri uri;
     if (_pos != null) {
-      uri = Uri.parse("https://www.google.com/maps/search/?api=1&query=${_pos!.latitude},${_pos!.longitude}");
+      uri = Uri.parse(
+        "https://www.google.com/maps/search/?api=1&query=${_pos!.latitude},${_pos!.longitude}",
+      );
     } else if (addr.isNotEmpty) {
-      uri = Uri.parse("https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(addr)}");
+      uri = Uri.parse(
+        "https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(addr)}",
+      );
     } else {
       return;
     }
@@ -131,7 +134,7 @@ class _EventMapCardState extends State<EventMapCard> {
               height: 160,
               child: Center(
                 child: Text(
-                  _error ?? "Sin coordenadas todavía. (Se calcula al guardar o al abrir)",
+                  _error ?? "Sin coordenadas todavía.",
                   style: const TextStyle(color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),

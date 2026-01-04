@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../config/app_config.dart';
+import '../../core/services/firestore_service.dart';
+import '../../models/trabajador.dart';
 
 class WorkerChatScreen extends StatefulWidget {
   const WorkerChatScreen({super.key});
@@ -11,53 +13,97 @@ class WorkerChatScreen extends StatefulWidget {
   State<WorkerChatScreen> createState() => _WorkerChatScreenState();
 }
 
-class _WorkerChatScreenState extends State<WorkerChatScreen> {
+class _WorkerChatScreenState extends State<WorkerChatScreen>
+    with SingleTickerProviderStateMixin {
   final String empresaId = AppConfig.empresaId;
+  final String myUid = FirebaseAuth.instance.currentUser!.uid;
 
-  final TextEditingController _messageController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
+  late final TabController _tab;
+
+  // ---- Tab ADMIN ----
+  final TextEditingController _adminMsgCtrl = TextEditingController();
+  final ScrollController _adminScroll = ScrollController();
+
+  // ---- Tab TRABAJADORES ----
+  Trabajador? _selected;
+  String _searchText = '';
+  final TextEditingController _msgCtrl = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
+
+  // Workers chat collection
+  CollectionReference<Map<String, dynamic>> get _userChats =>
+      FirebaseFirestore.instance
+          .collection('empresas')
+          .doc(empresaId)
+          .collection('chats_usuarios');
+
+  // Admin chat doc (legacy)
+  DocumentReference<Map<String, dynamic>> get _adminChatDoc =>
+      FirebaseFirestore.instance
+          .collection('empresas')
+          .doc(empresaId)
+          .collection('chats_trabajadores')
+          .doc(myUid);
+
+  String _chatIdFor(String a, String b) {
+    final pair = [a, b]..sort();
+    return '${pair[0]}_${pair[1]}';
+  }
+
+  DocumentReference<Map<String, dynamic>>? get _activeChatDoc {
+    final other = _selected?.id;
+    if (other == null) return null;
+    return _userChats.doc(_chatIdFor(myUid, other));
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _tab = TabController(length: 2, vsync: this);
+  }
 
   @override
   void dispose() {
-    _messageController.dispose();
-    _scrollController.dispose();
+    _tab.dispose();
+
+    _adminMsgCtrl.dispose();
+    _adminScroll.dispose();
+
+    _msgCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
-  CollectionReference<Map<String, dynamic>> _chatDocFor(String trabajadorId) {
-    return FirebaseFirestore.instance
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('chats_trabajadores');
-  }
-
-  Future<void> _sendMessage(String trabajadorId) async {
-    final text = _messageController.text.trim();
+  // -------------------------
+  // ADMIN CHAT (legacy)
+  // -------------------------
+  Future<void> _sendAdminMessage() async {
+    final text = _adminMsgCtrl.text.trim();
     if (text.isEmpty) return;
 
-    _messageController.clear();
+    _adminMsgCtrl.clear();
 
     final now = DateTime.now();
-    final chatDoc = _chatDocFor(trabajadorId).doc(trabajadorId);
-    final mensajesColl = chatDoc.collection('mensajes');
+    final msgs = _adminChatDoc.collection('mensajes');
 
     final batch = FirebaseFirestore.instance.batch();
 
-    // Añadimos mensaje
-    final msgRef = mensajesColl.doc();
-    batch.set(msgRef, {
-      'texto': text,
-      'enviadoPor': 'worker',
-      'creadoEn': Timestamp.fromDate(now),
-    });
+    batch.set(
+      msgs.doc(),
+      {
+        'texto': text,
+        'enviadoPor': myUid,
+        'enviadoEn': Timestamp.fromDate(now),
+        'creadoEn': FieldValue.serverTimestamp(),
+      },
+    );
 
     batch.set(
-      chatDoc,
+      _adminChatDoc,
       {
-        'trabajadorId': trabajadorId,
-        // nombre se podría guardar/actualizar desde otro sitio si quieres
+        'trabajadorId': myUid,
         'ultimoMensaje': text,
-        'ultimoMensajePor': 'worker',
+        'ultimoMensajePor': myUid,
         'ultimoMensajeEn': Timestamp.fromDate(now),
         'creadoEn': FieldValue.serverTimestamp(),
       },
@@ -67,9 +113,61 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
     await batch.commit();
 
     await Future.delayed(const Duration(milliseconds: 150));
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 60,
+    if (_adminScroll.hasClients) {
+      _adminScroll.animateTo(
+        _adminScroll.position.maxScrollExtent + 60,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  // -------------------------
+  // WORKERS CHAT (new)
+  // -------------------------
+  Future<void> _sendUserMessage() async {
+    final chatDoc = _activeChatDoc;
+    final other = _selected;
+    if (chatDoc == null || other == null) return;
+
+    final text = _msgCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    _msgCtrl.clear();
+
+    final now = DateTime.now();
+    final msgs = chatDoc.collection('mensajes');
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    batch.set(
+      msgs.doc(),
+      {
+        'texto': text,
+        'enviadoPor': myUid,
+        'enviadoEn': Timestamp.fromDate(now),
+        'creadoEn': FieldValue.serverTimestamp(),
+      },
+    );
+
+    batch.set(
+      chatDoc,
+      {
+        'members': [myUid, other.id],
+        'ultimoMensaje': text,
+        'ultimoMensajePor': myUid,
+        'ultimoMensajeEn': Timestamp.fromDate(now),
+        'creadoEn': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
+
+    await Future.delayed(const Duration(milliseconds: 150));
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent + 60,
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeOut,
       );
@@ -78,205 +176,291 @@ class _WorkerChatScreenState extends State<WorkerChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user == null) {
-      return const Scaffold(
-        body: Center(
-          child: Text('Debes iniciar sesión como trabajador.'),
-        ),
-      );
-    }
-
-    final trabajadorId = user.uid;
-
-    final chatDoc = _chatDocFor(trabajadorId).doc(trabajadorId);
-    final mensajesColl = chatDoc.collection('mensajes');
+    final isWide = MediaQuery.of(context).size.width > 900;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
-        title: const Text(
-          'Chat con la empresa',
-          style: TextStyle(
-            color: Color(0xFF111827),
-            fontWeight: FontWeight.w600,
-          ),
+        title: const Text('Chat'),
+        bottom: TabBar(
+          controller: _tab,
+          tabs: const [
+            Tab(icon: Icon(Icons.admin_panel_settings_outlined), text: 'Admin'),
+            Tab(icon: Icon(Icons.people_alt_outlined), text: 'Trabajadores'),
+          ],
         ),
-        centerTitle: false,
       ),
-      body: Column(
+      body: TabBarView(
+        controller: _tab,
         children: [
-          // Cabecera ligera
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: Colors.white,
-            width: double.infinity,
-            child: const Text(
-              'Usa este chat para hablar con administradores y coordinadores de tus eventos.',
-              style: TextStyle(
-                fontSize: 12,
-                color: Color(0xFF6B7280),
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          // Mensajes
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream:
-                  mensajesColl.orderBy('creadoEn').snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState ==
-                        ConnectionState.waiting &&
-                    !snapshot.hasData) {
-                  return const Center(
-                    child: CircularProgressIndicator(),
-                  );
-                }
+          _buildAdminChat(),
+          isWide
+              ? Row(
+                  children: [
+                    SizedBox(width: 360, child: _buildWorkersList()),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: _buildWorkersChatPanel()),
+                  ],
+                )
+              : (_selected == null
+                  ? _buildWorkersList()
+                  : _buildWorkersChatPanel(mobileBack: true)),
+        ],
+      ),
+    );
+  }
 
-                final docs = snapshot.data?.docs ?? [];
+  // -------------------------
+  // UI: ADMIN TAB
+  // -------------------------
+  Widget _buildAdminChat() {
+    final msgs = _adminChatDoc.collection('mensajes').orderBy('creadoEn');
 
-                if (docs.isEmpty) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(16.0),
+    return Column(
+      children: [
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: msgs.snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snapshot.data!.docs;
+
+              if (docs.isEmpty) {
+                return const Center(child: Text('Escribe al admin 👇'));
+              }
+
+              return ListView.builder(
+                controller: _adminScroll,
+                padding: const EdgeInsets.all(12),
+                itemCount: docs.length,
+                itemBuilder: (context, i) {
+                  final d = docs[i].data();
+                  final text = (d['texto'] ?? '').toString();
+                  final from = (d['enviadoPor'] ?? '').toString();
+                  final isMe = from == myUid;
+
+                  return Align(
+                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      constraints: const BoxConstraints(maxWidth: 520),
+                      decoration: BoxDecoration(
+                        color: isMe ? const Color(0xFF6366F1) : Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
                       child: Text(
-                        'Todavía no tienes mensajes.\n'
-                        'Cuando un admin te escriba o tú envíes uno, aparecerá aquí.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Color(0xFF6B7280),
-                        ),
+                        text,
+                        style: TextStyle(color: isMe ? Colors.white : Colors.black87),
                       ),
                     ),
                   );
+                },
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _adminMsgCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Mensaje al admin…',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _sendAdminMessage(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.send),
+                onPressed: _sendAdminMessage,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // -------------------------
+  // UI: WORKERS LIST
+  // -------------------------
+  Widget _buildWorkersList() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          TextField(
+            decoration: InputDecoration(
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 18),
+              hintText: 'Buscar trabajador...',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onChanged: (v) => setState(() => _searchText = v.trim().toLowerCase()),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: StreamBuilder<List<Trabajador>>(
+              stream: FirestoreService.instance.listenTrabajadores(empresaId),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
                 }
 
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final data = docs[index].data();
-                    final texto = (data['texto'] as String?) ?? '';
-                    final enviadoPor =
-                        (data['enviadoPor'] as String?) ?? 'admin';
-                    final ts = data['creadoEn'] as Timestamp?;
-                    String timeText = '';
-                    if (ts != null) {
-                      final dt = ts.toDate();
-                      final h =
-                          dt.hour.toString().padLeft(2, '0');
-                      final m =
-                          dt.minute.toString().padLeft(2, '0');
-                      timeText = '$h:$m';
-                    }
+                final all = snapshot.data!;
+                final filtered = all.where((t) {
+                  if (t.id == myUid) return false;
+                  if (_searchText.isEmpty) return true;
+                  final name = (t.nombre).toLowerCase();
+                  return name.contains(_searchText);
+                }).toList();
 
-                    final isMe = enviadoPor == 'worker';
+                if (filtered.isEmpty) {
+                  return const Center(child: Text('No hay resultados'));
+                }
 
-                    return Align(
-                      alignment: isMe
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin:
-                            const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        constraints: BoxConstraints(
-                          maxWidth:
-                              MediaQuery.of(context).size.width *
-                                  0.75,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? const Color(0xFF3B82F6)
-                              : const Color(0xFFE5E7EB),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: isMe
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              texto,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isMe
-                                    ? Colors.white
-                                    : Colors.black,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              timeText,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: isMe
-                                    ? Colors.white70
-                                    : Colors.black54,
-                              ),
-                            ),
-                          ],
+                return ListView.separated(
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final t = filtered[i];
+                    final selected = _selected?.id == t.id;
+
+                    return ListTile(
+                      selected: selected,
+                      leading: CircleAvatar(
+                        child: Text(
+                          (t.nombre.isNotEmpty ? t.nombre[0] : '?').toUpperCase(),
                         ),
                       ),
+                      title: Text(t.nombre),
+                      onTap: () => setState(() => _selected = t),
                     );
                   },
                 );
               },
             ),
           ),
-          // Input
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 12,
-              vertical: 8,
-            ),
-            color: Colors.white,
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: TextField(
-                      controller: _messageController,
-                      minLines: 1,
-                      maxLines: 5,
-                      decoration: const InputDecoration(
-                        hintText: 'Escribe un mensaje…',
-                        border: InputBorder.none,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: () => _sendMessage(trabajadorId),
-                  icon: const Icon(Icons.send),
-                  color: const Color(0xFF2563EB),
-                ),
-              ],
-            ),
-          ),
         ],
       ),
+    );
+  }
+
+  // -------------------------
+  // UI: WORKERS CHAT PANEL
+  // -------------------------
+  Widget _buildWorkersChatPanel({bool mobileBack = false}) {
+    final t = _selected;
+    final chatDoc = _activeChatDoc;
+
+    if (t == null || chatDoc == null) {
+      return const Center(child: Text('Selecciona un trabajador'));
+    }
+
+    final msgs = chatDoc.collection('mensajes').orderBy('creadoEn');
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+          ),
+          child: Row(
+            children: [
+              if (mobileBack)
+                IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => _selected = null),
+                ),
+              CircleAvatar(
+                child: Text((t.nombre.isNotEmpty ? t.nombre[0] : '?').toUpperCase()),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(t.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: msgs.snapshots(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snapshot.data!.docs;
+
+              if (docs.isEmpty) {
+                return const Center(child: Text('Empieza la conversación 👇'));
+              }
+
+              return ListView.builder(
+                controller: _scrollCtrl,
+                padding: const EdgeInsets.all(12),
+                itemCount: docs.length,
+                itemBuilder: (context, i) {
+                  final d = docs[i].data();
+                  final text = (d['texto'] ?? '').toString();
+                  final from = (d['enviadoPor'] ?? '').toString();
+                  final isMe = from == myUid;
+
+                  return Align(
+                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      constraints: const BoxConstraints(maxWidth: 520),
+                      decoration: BoxDecoration(
+                        color: isMe ? const Color(0xFF6366F1) : Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Text(
+                        text,
+                        style: TextStyle(color: isMe ? Colors.white : Colors.black87),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _msgCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Escribe un mensaje…',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _sendUserMessage(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.send),
+                onPressed: _sendUserMessage,
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

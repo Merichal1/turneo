@@ -7,13 +7,13 @@ import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
 import '../../models/disponibilidad_evento.dart';
+import '../../widgets/worker_event_details_sheet.dart';
 
 class WorkerAvailabilityScreen extends StatefulWidget {
   const WorkerAvailabilityScreen({super.key});
 
   @override
-  State<WorkerAvailabilityScreen> createState() =>
-      _WorkerAvailabilityScreenState();
+  State<WorkerAvailabilityScreen> createState() => _WorkerAvailabilityScreenState();
 }
 
 class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
@@ -38,16 +38,12 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
     }
 
     final bool isWideScreen = MediaQuery.of(context).size.width > 900;
-    final double dynamicRowHeight =
-        isWideScreen ? (MediaQuery.of(context).size.height * 0.10) : 52.0;
+    final double dynamicRowHeight = isWideScreen ? (MediaQuery.of(context).size.height * 0.10) : 52.0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
       appBar: AppBar(
-        title: const Text(
-          "Mi calendario",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text("Mi calendario", style: TextStyle(fontWeight: FontWeight.bold)),
       ),
       body: StreamBuilder<List<Evento>>(
         stream: FirestoreService.instance.listenEventos(empresaId),
@@ -59,8 +55,7 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
           final eventos = eventosSnap.data!;
 
           return StreamBuilder<List<DisponibilidadEvento>>(
-            stream: FirestoreService.instance
-                .listenSolicitudesDisponibilidadTrabajador(user.uid),
+            stream: FirestoreService.instance.listenSolicitudesDisponibilidadTrabajador(user.uid),
             builder: (context, dispoSnap) {
               if (!dispoSnap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -72,8 +67,7 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
                   .map((s) => s.eventoId)
                   .toSet();
 
-              final assignedEvents =
-                  eventos.where((e) => assignedEventIds.contains(e.id)).toList();
+              final assignedEvents = eventos.where((e) => assignedEventIds.contains(e.id)).toList();
 
               // Precalcular "día -> nº asignaciones"
               final Map<String, int> assignedCountByDay = {};
@@ -92,14 +86,11 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
                     return const Center(child: CircularProgressIndicator());
                   }
 
-                  final Set<String> snapshotUnavailable = indispoSnap.data!
-                      .map((d) => _dateId(d))
-                      .toSet();
+                  final Set<String> snapshotUnavailable =
+                      indispoSnap.data!.map((d) => _dateId(d)).toSet();
 
-                  final Set<String> unavailable = {
-                    ...snapshotUnavailable,
-                    ..._optimisticAdd
-                  }..removeAll(_optimisticRemove);
+                  final Set<String> unavailable = {...snapshotUnavailable, ..._optimisticAdd}
+                    ..removeAll(_optimisticRemove);
 
                   final String selectedId = _dateId(_selectedDay);
                   final bool selectedIsUnavailable = unavailable.contains(selectedId);
@@ -109,11 +100,8 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
                       .toList()
                     ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
 
-                  final bool isPast = _dateOnly(_selectedDay)
-                      .isBefore(_dateOnly(DateTime.now()));
-
-                  final bool canToggleNoDisponible =
-                      selectedAssignedEvents.isEmpty && !isPast;
+                  final bool isPast = _dateOnly(_selectedDay).isBefore(_dateOnly(DateTime.now()));
+                  final bool canToggleNoDisponible = selectedAssignedEvents.isEmpty && !isPast;
 
                   return Column(
                     children: [
@@ -181,10 +169,7 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
                             headerStyle: const HeaderStyle(
                               formatButtonVisible: false,
                               titleCentered: true,
-                              titleTextStyle: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                              titleTextStyle: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                             ),
                             calendarBuilders: CalendarBuilders(
                               markerBuilder: (context, day, events) {
@@ -304,6 +289,9 @@ class _WorkerAvailabilityScreenState extends State<WorkerAvailabilityScreen> {
                                       final fecha = DateFormat('dd/MM/yyyy').format(e.fechaInicio);
 
                                       return ListTile(
+                                        // ✅ ESTE ERA EL FALLO: AHORA SÍ ABRE
+                                        onTap: () => WorkerEventDetailsSheet.open(context, e),
+
                                         leading: const CircleAvatar(
                                           backgroundColor: Color(0xFFEEF2FF),
                                           child: Icon(Icons.event, color: Color(0xFF6366F1)),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
 import '../../models/evento.dart';
@@ -14,13 +15,15 @@ class WorkerEventsScreen extends StatefulWidget {
 }
 
 class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
-  bool _verTodos = false; // Toggle para filtrar eventos
+  bool _verTodos = false;
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final empresaId = AppConfig.empresaId;
-    if (user == null) return const Scaffold(body: Center(child: Text('Inicia sesión')));
+    if (user == null) {
+      return const Scaffold(body: Center(child: Text('Inicia sesión')));
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFFF3F4F6),
@@ -33,9 +36,17 @@ class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _FilterButton(label: "Próximos", isSelected: !_verTodos, onTap: () => setState(() => _verTodos = false)),
+                _FilterButton(
+                  label: "Próximos",
+                  isSelected: !_verTodos,
+                  onTap: () => setState(() => _verTodos = false),
+                ),
                 const SizedBox(width: 12),
-                _FilterButton(label: "Todos", isSelected: _verTodos, onTap: () => setState(() => _verTodos = true)),
+                _FilterButton(
+                  label: "Todos",
+                  isSelected: _verTodos,
+                  onTap: () => setState(() => _verTodos = true),
+                ),
               ],
             ),
           ),
@@ -44,32 +55,40 @@ class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
       body: StreamBuilder<List<Evento>>(
         stream: FirestoreService.instance.listenEventos(empresaId),
         builder: (context, eventosSnap) {
-          if (!eventosSnap.hasData) return const Center(child: CircularProgressIndicator());
+          if (!eventosSnap.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
           return StreamBuilder<List<DisponibilidadEvento>>(
             stream: FirestoreService.instance.listenSolicitudesDisponibilidadTrabajador(user.uid),
             builder: (context, dispoSnap) {
-              if (!dispoSnap.hasData) return const Center(child: CircularProgressIndicator());
+              if (!dispoSnap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
               final solicitudes = dispoSnap.data!;
-              final Map<String, DisponibilidadEvento> mapaDispo = {for (var d in solicitudes) d.eventoId: d};
+              final mapaDispo = <String, DisponibilidadEvento>{
+                for (final d in solicitudes) d.eventoId: d,
+              };
 
-              // FILTRADO Y ORDENACIÓN
               var eventos = eventosSnap.data!.where((e) {
                 final d = mapaDispo[e.id];
                 if (d == null || !d.asignado) return false;
-                if (!_verTodos) return e.fechaInicio.isAfter(DateTime.now()); // Solo futuros
+                if (!_verTodos) return e.fechaInicio.isAfter(DateTime.now()); // solo futuros
                 return true;
               }).toList();
 
-              // Ordenar: Próximos (Ascendente) / Todos (Descendente)
               if (_verTodos) {
                 eventos.sort((a, b) => b.fechaInicio.compareTo(a.fechaInicio));
               } else {
                 eventos.sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
               }
 
-              if (eventos.isEmpty) return Center(child: Text(_verTodos ? 'No hay historial' : 'No tienes eventos próximos'));
+              if (eventos.isEmpty) {
+                return Center(
+                  child: Text(_verTodos ? 'No hay historial' : 'No tienes eventos próximos'),
+                );
+              }
 
               return ListView.builder(
                 padding: const EdgeInsets.all(16),
@@ -80,25 +99,44 @@ class _WorkerEventsScreenState extends State<WorkerEventsScreen> {
                   final haPasado = e.fechaInicio.isBefore(DateTime.now());
 
                   return Card(
-                    color: haPasado ? Colors.white.withOpacity(0.8) : Colors.white,
+                    color: haPasado ? Colors.white.withOpacity(0.85) : Colors.white,
                     margin: const EdgeInsets.only(bottom: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
                       onTap: () => _openEventDetails(context, e),
                       contentPadding: const EdgeInsets.all(16),
-                      title: Text(e.nombre, style: TextStyle(fontWeight: FontWeight.bold, color: haPasado ? Colors.grey : Colors.black)),
+                      title: Text(
+                        e.nombre,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: haPasado ? Colors.grey : Colors.black,
+                        ),
+                      ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 4),
-                          Text('${_formatFechaCorta(e.fechaInicio)} · ${_formatHora(e.fechaInicio)}', style: const TextStyle(color: Color(0xFF6366F1))),
-                          Text('${e.ciudad} - ${e.direccion}', style: const TextStyle(fontSize: 12)),
+                          Text(
+                            '${_formatFechaCorta(e.fechaInicio)} · ${_formatHora(e.fechaInicio)}',
+                            style: const TextStyle(color: Color(0xFF6366F1)),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${e.ciudad} - ${e.direccion}',
+                            style: const TextStyle(fontSize: 12),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
                       ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          if (haPasado) const Text("FINALIZADO", style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
+                          if (haPasado)
+                            const Text(
+                              "FINALIZADO",
+                              style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold),
+                            ),
                           _EstadoBadge(asignado: d.asignado),
                         ],
                       ),
@@ -133,11 +171,30 @@ void _openEventDetails(BuildContext context, Evento e) {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(e.nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            // TÍTULO
+            Text(
+              e.nombre,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 6),
-            Text('${e.ciudad} · ${e.direccion}', style: const TextStyle(color: Colors.grey)),
+
+            // FECHA / HORA
+            Text(
+              '${_formatFechaCorta(e.fechaInicio)} · ${_formatHora(e.fechaInicio)}  →  ${_formatHora(e.fechaFin)}',
+              style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+
+            // UBICACIÓN TEXTO
+            Text(
+              '${e.ciudad} · ${e.direccion}',
+              style: const TextStyle(color: Colors.grey),
+            ),
             const SizedBox(height: 12),
+
+            // MAPA
             EventMapCard(evento: e),
+
             const SizedBox(height: 10),
           ],
         ),
@@ -150,7 +207,12 @@ class _FilterButton extends StatelessWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
-  const _FilterButton({required this.label, required this.isSelected, required this.onTap});
+
+  const _FilterButton({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -158,8 +220,19 @@ class _FilterButton extends StatelessWidget {
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        decoration: BoxDecoration(color: isSelected ? const Color(0xFF6366F1) : Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF6366F1))),
-        child: Text(label, style: TextStyle(color: isSelected ? Colors.white : const Color(0xFF6366F1), fontWeight: FontWeight.bold, fontSize: 13)),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6366F1) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: const Color(0xFF6366F1)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : const Color(0xFF6366F1),
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+          ),
+        ),
       ),
     );
   }
@@ -173,12 +246,24 @@ class _EstadoBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: const Color(0xFFDBEAFE), borderRadius: BorderRadius.circular(6)),
-      child: const Text("ASIGNADO", style: TextStyle(color: Color(0xFF1D4ED8), fontSize: 10, fontWeight: FontWeight.bold)),
+      decoration: BoxDecoration(
+        color: const Color(0xFFDBEAFE),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: const Text(
+        "ASIGNADO",
+        style: TextStyle(
+          color: Color(0xFF1D4ED8),
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
 
 // Helpers de formato
-String _formatFechaCorta(DateTime d) => "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
-String _formatHora(DateTime d) => "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
+String _formatFechaCorta(DateTime d) =>
+    "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}";
+String _formatHora(DateTime d) =>
+    "${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";

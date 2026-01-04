@@ -7,12 +7,14 @@ class Evento {
   final DateTime fechaInicio;
   final DateTime fechaFin;
   final String estado;
-  final Map<String, int> rolesRequeridos; // {"Camarero": 2, ...}
+
+  final Map<String, int> rolesRequeridos;
   final int cantidadRequeridaTrabajadores;
+
   final String ciudad;
   final String direccion;
 
-  // ✅ NUEVO (opcionales, para mapa)
+  // Para mapa
   final double? lat;
   final double? lng;
 
@@ -36,32 +38,30 @@ class Evento {
     this.lng,
   });
 
-  factory Evento.fromFirestore(
-    DocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
+  factory Evento.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
 
-    final Timestamp? tsInicio = data['fechaInicio'];
-    final Timestamp? tsFin = data['fechaFin'];
-    final Timestamp? tsCreadoEn = data['creadoEn'];
+    final tsInicio = data['fechaInicio'] as Timestamp?;
+    final tsFin = data['fechaFin'] as Timestamp?;
+    final tsCreadoEn = data['creadoEn'] as Timestamp?;
 
-    // --- rolesRequeridos: mapa {rol: cantidad} ---
+    // roles
     final rolesDynamic = data['rolesRequeridos'];
-    final Map<String, int> roles = {};
+    final roles = <String, int>{};
     if (rolesDynamic is Map) {
-      rolesDynamic.forEach((key, value) {
-        if (value is num) roles[key.toString()] = value.toInt();
+      rolesDynamic.forEach((k, v) {
+        if (v is num) roles[k.toString()] = v.toInt();
       });
     }
 
-    // --- cantidadRequeridaTrabajadores ---
+    // cantidad
     final rawCantidad = data['cantidadRequeridaTrabajadores'];
     int cantidad = rawCantidad is num ? rawCantidad.toInt() : 0;
     if (cantidad == 0 && roles.isNotEmpty) {
-      cantidad = roles.values.fold<int>(0, (sum, v) => sum + v);
+      cantidad = roles.values.fold<int>(0, (s, v) => s + v);
     }
 
-    // --- ubicación: soporta 'ubicacion' (tu estructura) y también 'location' por compatibilidad ---
+    // ubicación
     String ciudad = '';
     String direccion = '';
     double? lat;
@@ -71,6 +71,7 @@ class Evento {
     if (ubicacion is Map) {
       final ciudadRaw = ubicacion['Ciudad'] ?? ubicacion['ciudad'];
       final direccionRaw = ubicacion['Dirección'] ?? ubicacion['direccion'];
+
       if (ciudadRaw is String) ciudad = ciudadRaw;
       if (direccionRaw is String) direccion = direccionRaw;
 
@@ -80,7 +81,7 @@ class Evento {
       if (lngRaw is num) lng = lngRaw.toDouble();
     }
 
-    // compat por si en algún momento guardaste "location"
+    // compat (por si guardaste "location")
     final location = data['location'];
     if ((lat == null || lng == null) && location is Map) {
       final latRaw = location['lat'];
@@ -89,15 +90,13 @@ class Evento {
       if (lngRaw is num) lng = lngRaw.toDouble();
     }
 
-    final estadoRaw = data['estado'] as String? ?? 'activo';
-
     return Evento(
       id: doc.id,
       nombre: data['nombre'] as String? ?? '',
       tipo: data['tipo'] as String? ?? '',
       fechaInicio: tsInicio?.toDate() ?? DateTime.now(),
       fechaFin: tsFin?.toDate() ?? DateTime.now(),
-      estado: estadoRaw,
+      estado: data['estado'] as String? ?? 'activo',
       rolesRequeridos: roles,
       cantidadRequeridaTrabajadores: cantidad,
       ciudad: ciudad,
@@ -123,7 +122,6 @@ class Evento {
       'ubicacion': {
         'Ciudad': ciudad,
         'Dirección': direccion,
-        // ✅ NUEVO
         'lat': lat,
         'lng': lng,
       },
