@@ -1,21 +1,23 @@
 import 'package:flutter/widgets.dart';
 
-// AUTH NUEVA (ZIP)
-import '../auth_ui/Screens/Welcome/welcome_screen.dart' as zip;
-import '../auth_ui/Screens/Login/login_screen.dart' as zip;
-import '../auth_ui/Screens/Signup/signup_screen.dart' as zip;
-
 // COMMON
 import '../screens/common/splash_screen.dart';
 import '../screens/common/error_screen.dart';
+
+// AUTH (NUEVO)
+import '../screens/auth/turneo_start_screen.dart';
+import '../screens/Login/login_screen.dart';
+// 👉 OJO: aquí pon el import real de tu registro NUEVO
+import '../screens/Signup/signup_screen.dart'; // si tu registro moderno está aquí
+// si NO existe, me lo dices y te lo creo en 1 archivo.
 
 // ADMIN
 import '../screens/admin/admin_shell_screen.dart';
 import '../screens/admin/admin_home_screen.dart';
 import '../screens/admin/admin_events_screen.dart';
-import '../screens/admin/admin_workers_screen.dart'; // NUEVO
-import '../screens/admin/admin_chat_screen.dart'; // NUEVO
-import '../screens/admin/admin_database_screen.dart' hide AdminEventScreen;
+import '../screens/admin/admin_workers_screen.dart';
+import '../screens/admin/admin_chat_screen.dart';
+import '../screens/admin/admin_database_screen.dart';
 import '../screens/admin/admin_import_screen.dart';
 import '../screens/admin/admin_payments_history_screen.dart';
 import '../screens/admin/admin_notificaciones_screen.dart';
@@ -35,22 +37,17 @@ class Routes {
   static const splash = '/splash';
   static const error = '/error';
 
-  // Auth (original)
-  static const login = '/auth/login';
-  static const register = '/auth/register';
-  static const changePassword = '/auth/change-password';
-
-  // Auth nueva (ZIP)
+  // Auth nueva
   static const welcome = '/auth/welcome';
-  static const loginZip = '/auth/login-zip';
-  static const registerZip = '/auth/register-zip';
+  static const loginZip = '/auth/login';
+  static const registerZip = '/auth/register';
 
   // Admin
   static const adminShell = '/admin';
   static const adminHome = '/admin/home';
   static const adminEvents = '/admin/events';
-  static const adminWorkers = '/admin/workers'; // NUEVO
-  static const adminChat = '/admin/chat'; // NUEVO
+  static const adminWorkers = '/admin/workers';
+  static const adminChat = '/admin/chat';
   static const adminDatabase = '/admin/database';
   static const adminImport = '/admin/import';
   static const adminPaymentsHistory = '/admin/payments-history';
@@ -60,32 +57,30 @@ class Routes {
   static const workerHome = '/worker/home';
   static const workerEvents = '/worker/events';
 
-  /// Mapa de rutas -> builders
   static Map<String, WidgetBuilder> builders = {
-    // Debug
     debugLauncher: (_) => const DebugLauncherScreen(),
 
     // Common
     splash: (_) => const SplashScreen(),
     error: (_) => const ErrorScreen(),
 
-    // AUTH NUEVA (ZIP)
-    welcome: (_) => const zip.WelcomeScreen(),
-    loginZip: (_) => const zip.LoginScreen(),
-    registerZip: (_) => const zip.SignUpScreen(),
+    // Auth NUEVA
+    welcome: (_) => const TurneoStartScreen(),
+    loginZip: (_) => const LoginScreenModern(),
+    registerZip: (_) => const SignUpScreen(), // ⚠️ si tu clase se llama diferente, cámbiala aquí
 
-    // ADMIN
+    // Admin
     adminShell: (_) => const AdminShellScreen(),
     adminHome: (_) => const AdminHomeScreen(),
     adminEvents: (_) => const AdminEventsScreen(),
-    adminWorkers: (_) => const AdminWorkersScreen(), // NUEVO
-    adminChat: (_) => const AdminChatScreen(), // NUEVO
+    adminWorkers: (_) => const AdminWorkersScreen(),
+    adminChat: (_) => const AdminChatScreen(),
     adminDatabase: (_) => const AdminDatabaseScreen(),
     adminImport: (_) => const AdminImportScreen(),
     adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),
     adminNotifications: (_) => const AdminNotificacionesScreen(),
 
-    // WORKER
+    // Worker
     workerHome: (_) => const WorkerHomeScreen(),
     workerEvents: (_) => const WorkerEventsScreen(),
   };

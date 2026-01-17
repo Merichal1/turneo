@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import '../../core/services/auth_service.dart';
+import '../../routes/app_routes.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -10,45 +11,44 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
+  bool _navigated = false;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _boot());
+    _boot();
   }
 
   Future<void> _boot() async {
     try {
-      final auth = FirebaseAuth.instance;
-      final current = auth.currentUser;
+      // ✅ Espera a que FirebaseAuth restaure sesión (clave en web)
+      final user = await FirebaseAuth.instance.authStateChanges().first;
 
-      if (current == null) {
-        _go('/login');
+      if (user == null) {
+        _go(Routes.welcome); // o Routes.loginZip si prefieres
         return;
       }
 
-      // Carga rol del usuario (ajusta colección/campo si usas otros nombres)
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(current.uid)
-          .get();
+      final email = (user.email ?? '').trim();
+      // ✅ Query rápido (collectionGroup), con timeout para evitar “splash infinito”
+      final empresaAdminId = await AuthService.instance
+          .getEmpresaIdForAdminEmail(email)
+          .timeout(const Duration(seconds: 6), onTimeout: () => null);
 
-      final data = doc.data() ?? {};
-      final role = (data['role'] ?? data['rol'] ?? 'worker').toString();
-
-      if (role == 'admin') {
-        _go('/admin'); // <- tu shell responsive con sidebar/bottom bar
+      if (empresaAdminId != null) {
+        _go(Routes.adminShell);
       } else {
-        _go('/worker/home');
+        _go(Routes.workerHome);
       }
-    } catch (e) {
-      // En caso de error, mejor ir a login
-      _go('/login');
+    } catch (_) {
+      _go(Routes.welcome);
     }
   }
 
   void _go(String route) {
-    if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
+    if (!mounted || _navigated) return;
+    _navigated = true;
+    Navigator.of(context).pushNamedAndRemoveUntil(route, (_) => false);
   }
 
   @override

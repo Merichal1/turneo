@@ -15,26 +15,25 @@ class _DebugLauncherScreenState extends State<DebugLauncherScreen> {
   // Definimos secciones para mostrar bonito en el launcher.
   final Map<String, List<_DebugItem>> _sections = {
     'Auth': [
-      _DebugItem('Login', Routes.login, Icons.login),
-      _DebugItem('Register', Routes.register, Icons.app_registration),
-      _DebugItem('Change Password', Routes.changePassword, Icons.password),
+      const _DebugItem('Login', Routes.loginZip, Icons.login),
+      const _DebugItem('Register', Routes.registerZip, Icons.app_registration),
     ],
     'Admin': [
-      _DebugItem('Admin Shell', Routes.adminShell, Icons.dashboard_customize),
-      _DebugItem('Admin Home', Routes.adminHome, Icons.home_filled),
-      _DebugItem('Admin Events', Routes.adminEvents, Icons.event),
-      _DebugItem('Admin Database', Routes.adminDatabase, Icons.storage),
-      _DebugItem('Admin Import', Routes.adminImport, Icons.file_upload),
-      _DebugItem('Payments History', Routes.adminPaymentsHistory, Icons.receipt_long),
-      _DebugItem('Notifications', Routes.adminNotifications, Icons.notifications),
+      const _DebugItem('Admin Shell', Routes.adminShell, Icons.dashboard_customize),
+      const _DebugItem('Admin Home', Routes.adminHome, Icons.home_filled),
+      const _DebugItem('Admin Events', Routes.adminEvents, Icons.event),
+      const _DebugItem('Admin Database', Routes.adminDatabase, Icons.storage),
+      const _DebugItem('Admin Import', Routes.adminImport, Icons.file_upload),
+      const _DebugItem('Payments History', Routes.adminPaymentsHistory, Icons.receipt_long),
+      const _DebugItem('Notifications', Routes.adminNotifications, Icons.notifications),
     ],
     'Worker': [
-      _DebugItem('Worker Home', Routes.workerHome, Icons.badge),
-      _DebugItem('Worker Events', Routes.workerEvents, Icons.event_note),
+      const _DebugItem('Worker Home', Routes.workerHome, Icons.badge),
+      const _DebugItem('Worker Events', Routes.workerEvents, Icons.event_note),
     ],
     'Common': [
-      _DebugItem('Splash', Routes.splash, Icons.surfing),
-      _DebugItem('Error', Routes.error, Icons.error_outline),
+      const _DebugItem('Splash', Routes.splash, Icons.surfing),
+      const _DebugItem('Error', Routes.error, Icons.error_outline),
     ],
   };
 

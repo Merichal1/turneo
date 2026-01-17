@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'admin_home_screen.dart';
@@ -6,6 +7,7 @@ import 'admin_workers_screen.dart';
 import 'admin_notificaciones_screen.dart';
 import 'admin_payments_history_screen.dart';
 import 'admin_chat_screen.dart';
+
 
 class AdminShellScreen extends StatefulWidget {
   const AdminShellScreen({super.key});
@@ -31,21 +33,38 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     const AdminDatabaseScreen(), // 6 – Empresas
   ];
 
-  @override
-  Widget build(BuildContext context) {
-    // MODIFICADO: ahora es responsive (web/tablet/móvil)
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 900; // NUEVO
-        final isCompact = constraints.maxWidth < 600; // NUEVO
+@override
+Widget build(BuildContext context) {
+  return StreamBuilder<User?>(
+    stream: FirebaseAuth.instance.authStateChanges(),
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
 
-        if (isWide) {
-          return _buildWideScaffold(context); // NUEVO
-        }
-        return _buildNarrowScaffold(context, isCompact: isCompact); // NUEVO
-      },
-    );
-  }
+      final user = snapshot.data;
+
+      if (user == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+        });
+        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      }
+
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 900;
+          final isCompact = constraints.maxWidth < 600;
+
+          if (isWide) return _buildWideScaffold(context);
+          return _buildNarrowScaffold(context, isCompact: isCompact);
+        },
+      );
+    },
+  );
+}
+
 
   // NUEVO: Layout escritorio/web: menú lateral fijo (como estaba antes)
   Widget _buildWideScaffold(BuildContext context) {
@@ -133,7 +152,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
       case 4:
         return 'Chat';
       case 5:
-        return 'Pagos';
+        return 'Gestión';
       case 6:
         return 'Empresas';
       default:
@@ -190,14 +209,8 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           _drawerItem(
             context,
             icon: Icons.payments_outlined,
-            label: 'Pagos',
+            label: 'Gestión',
             index: 5,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.business_outlined,
-            label: 'Empresas',
-            index: 6,
           ),
           const Divider(),
           const ListTile(
@@ -211,9 +224,11 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           ListTile(
             leading: const Icon(Icons.logout, size: 20),
             title: const Text('Cerrar sesión'),
-            onTap: () {
-              // TODO: logout
-              Navigator.of(context).pop(); // NUEVO
+            onTap: () async {
+              Navigator.of(context).pop();
+              await FirebaseAuth.instance.signOut();
+              if (!mounted) return;
+              Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
             },
           ),
         ],
@@ -288,7 +303,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
             ),
             _SideMenuItem(
               icon: Icons.payments_outlined,
-              label: 'Pagos',
+              label: 'Gestión',
               isSelected: _selectedIndex == 5,
               onTap: () => _onItemTap(5),
             ),
@@ -309,8 +324,10 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
               subtitle: Text('admin@eventstaff.com'),
             ),
             TextButton.icon(
-              onPressed: () {
-                // TODO: logout
+              onPressed: () async {
+                await FirebaseAuth.instance.signOut();
+                if (!mounted) return;
+                Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
               },
               icon: const Icon(Icons.logout, size: 18),
               label: const Text('Cerrar sesión'),

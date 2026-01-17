@@ -10,6 +10,7 @@ class DisponibilidadEvento {
   final bool asignado;
   final DateTime creadoEn;
   final DateTime? respondidoEn;
+  
 
   DisponibilidadEvento({
     required this.id,

@@ -88,7 +88,7 @@ static ThemeData vogueGlovoLight = ThemeData(
     indicatorColor: _gold.withOpacity(0.18),
     backgroundColor: _ivory,
     // ⬇️ Usa MaterialStateProperty en lugar de WidgetStateProperty
-    labelTextStyle: MaterialStateProperty.all(
+    labelTextStyle: WidgetStateProperty.all(
       const TextStyle(fontWeight: FontWeight.w700),
     ),
   ),

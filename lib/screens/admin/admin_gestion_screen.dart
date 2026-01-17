@@ -2,80 +2,61 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class AdminPaymentsHistoryScreen extends StatefulWidget {
-  const AdminPaymentsHistoryScreen({super.key});
+/// Pantalla de "Gestión": lista trabajadores que han asistido a un evento
+/// y permite marcar si están pagados o no.
+///
+/// ✅ Multiempresa: todo cuelga de /empresas/{empresaId}/...
+/// ✅ Fuente de verdad: subcolección /eventos/{eventoId}/disponibilidad
+///    - asistio: bool
+///    - pagado: bool
+///    - trabajadorNombre: string
+///    - trabajadorRol: string
+///
+/// Si en tu BD la asistencia/pagos están en otra colección, lo adaptamos.
+class AdminGestionScreen extends StatefulWidget {
+  const AdminGestionScreen({super.key});
 
   @override
-  State<AdminPaymentsHistoryScreen> createState() =>
-      _AdminPaymentsHistoryScreenState();
+  State<AdminGestionScreen> createState() => _AdminGestionScreenState();
 }
 
-class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen> {
+class _AdminGestionScreenState extends State<AdminGestionScreen> {
   final _db = FirebaseFirestore.instance;
 
   String? _empresaId;
   String? _selectedEventoId;
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadEmpresaIdForAdmin();
+    _loadEmpresaId();
   }
 
-  /// ✅ Basado en TU BD:
-  /// Busca en empresas/*/Administradores where Email == email_logueado
-  /// Si encuentra, esa empresa es la del admin.
-  Future<void> _loadEmpresaIdForAdmin() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      final email = user?.email?.trim().toLowerCase();
+  Future<void> _loadEmpresaId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-      if (user == null || email == null || email.isEmpty) {
-        setState(() => _error = 'No hay usuario logueado (o no tiene email).');
-        return;
-      }
+    final userDoc = await _db.collection('users').doc(user.uid).get();
+    final empresaId = userDoc.data()?['empresaId'] as String?;
 
-      // Recorremos empresas y buscamos en subcolección Administradores por Email
-      final empresas = await _db.collection('empresas').get();
-
-      for (final emp in empresas.docs) {
-        final adminsSnap = await _db
-            .collection('empresas')
-            .doc(emp.id)
-            .collection('Administradores')
-            .where('Email', isEqualTo: email) // en tu captura el campo se llama Email
-            .limit(1)
-            .get();
-
-        if (adminsSnap.docs.isNotEmpty) {
-          setState(() => _empresaId = emp.id);
-          return;
-        }
-      }
-
-      setState(() => _error = 'Tu email no está en Administradores de ninguna empresa.');
-    } catch (e) {
-      setState(() => _error = 'Error detectando empresa del admin: $e');
-    }
+    if (!mounted) return;
+    setState(() => _empresaId = empresaId);
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _eventosStream(String empresaId) {
-    // Si tu FirestoreService ordena por fechaInicio, mantenemos eso
     return _db
         .collection('empresas')
         .doc(empresaId)
         .collection('eventos')
-        .orderBy('fechaInicio', descending: false)
+        .orderBy('fechaInicio', descending: true)
         .snapshots();
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _asistidosStream({
+  Stream<QuerySnapshot<Map<String, dynamic>>> _asistentesStream({
     required String empresaId,
     required String eventoId,
   }) {
-    // En tu BD: disponibilidad subcolección dentro del evento
-    // Filtramos por asistio = true
+    // Dentro del evento => respeta separación por empresa sin collectionGroup
     return _db
         .collection('empresas')
         .doc(empresaId)
@@ -102,7 +83,7 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
         .set(
       {
         'pagado': pagado,
-        'pagadoEn': pagado ? FieldValue.serverTimestamp() : FieldValue.delete(),
+        'pagadoEn': pagado ? FieldValue.serverTimestamp() : null,
       },
       SetOptions(merge: true),
     );
@@ -110,16 +91,8 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(_error!, textAlign: TextAlign.center),
-        ),
-      );
-    }
-
     final empresaId = _empresaId;
+
     if (empresaId == null) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -129,28 +102,37 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Gestión',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+          Row(
+            children: [
+              const Icon(Icons.tune),
+              const SizedBox(width: 8),
+              Text(
+                'Gestión de pagos',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
 
-          /// Selector de evento
+          // Selector de evento
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _eventosStream(empresaId),
             builder: (context, snap) {
               if (snap.hasError) {
-                return Text('Error cargando eventos: ${snap.error}');
+                return _errorBox('Error cargando eventos: ${snap.error}');
               }
               if (!snap.hasData) {
                 return const LinearProgressIndicator();
               }
 
               final docs = snap.data!.docs;
-              if (docs.isEmpty) return const Text('No hay eventos.');
+              if (docs.isEmpty) {
+                return _infoBox('No hay eventos todavía.');
+              }
 
+              // Autoselección del primer evento
               _selectedEventoId ??= docs.first.id;
 
               return DropdownButtonFormField<String>(
@@ -161,10 +143,15 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                 ),
                 items: docs.map((d) {
                   final data = d.data();
-                  final nombre = (data['nombre'] ?? 'Evento') as String;
+                  final titulo =
+                      (data['titulo'] ?? data['nombre'] ?? 'Evento') as String;
+                  final fechaTxt = _formatMaybeTimestamp(data['fechaInicio']);
                   return DropdownMenuItem(
                     value: d.id,
-                    child: Text(nombre, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      '$titulo${fechaTxt.isEmpty ? '' : ' • $fechaTxt'}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   );
                 }).toList(),
                 onChanged: (v) => setState(() => _selectedEventoId = v),
@@ -174,20 +161,17 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
           const SizedBox(height: 16),
 
-          /// Lista de asistentes (asistio=true) con pagado/no pagado
           Expanded(
             child: _selectedEventoId == null
-                ? const Center(child: Text('Selecciona un evento.'))
+                ? _infoBox('Selecciona un evento para ver asistentes.')
                 : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: _asistidosStream(
+                    stream: _asistentesStream(
                       empresaId: empresaId,
                       eventoId: _selectedEventoId!,
                     ),
                     builder: (context, snap) {
                       if (snap.hasError) {
-                        return Center(
-                          child: Text('Error cargando asistentes: ${snap.error}'),
-                        );
+                        return _errorBox('Error cargando asistentes: ${snap.error}');
                       }
                       if (!snap.hasData) {
                         return const Center(child: CircularProgressIndicator());
@@ -195,23 +179,32 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
                       final docs = snap.data!.docs;
                       if (docs.isEmpty) {
-                        return const Center(
-                          child: Text('No hay trabajadores con "asistio = true" en este evento.'),
+                        return _infoBox(
+                          'Todavía no hay trabajadores con "asistio = true" en este evento.',
                         );
                       }
 
-                      return ListView.builder(
+                      return ListView.separated(
                         itemCount: docs.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (context, i) {
-                          final doc = docs[i];
-                          final data = doc.data();
+                          final d = docs[i];
+                          final data = d.data();
 
-                          final nombre = (data['trabajadorNombre'] ?? 'Trabajador') as String;
+                          final nombre =
+                              (data['trabajadorNombre'] ?? 'Trabajador') as String;
                           final rol = (data['trabajadorRol'] ?? '') as String;
-                          final pagado = data['pagado'] == true;
+                          final pagado = (data['pagado'] == true);
 
                           return Card(
                             child: ListTile(
+                              leading: CircleAvatar(
+                                child: Text(
+                                  nombre.isNotEmpty
+                                      ? nombre.trim()[0].toUpperCase()
+                                      : 'T',
+                                ),
+                              ),
                               title: Text(nombre),
                               subtitle: rol.isEmpty ? null : Text(rol),
                               trailing: SizedBox(
@@ -234,12 +227,21 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                                   ],
                                   onChanged: (v) async {
                                     if (v == null) return;
-                                    await _setPagado(
-                                      empresaId: empresaId,
-                                      eventoId: _selectedEventoId!,
-                                      disponibilidadId: doc.id,
-                                      pagado: v,
-                                    );
+                                    try {
+                                      await _setPagado(
+                                        empresaId: empresaId,
+                                        eventoId: _selectedEventoId!,
+                                        disponibilidadId: d.id,
+                                        pagado: v,
+                                      );
+                                    } catch (e) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('No se pudo actualizar: $e'),
+                                        ),
+                                      );
+                                    }
                                   },
                                 ),
                               ),
@@ -252,6 +254,38 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
           ),
         ],
       ),
+    );
+  }
+
+  static String _formatMaybeTimestamp(dynamic value) {
+    if (value is Timestamp) {
+      final d = value.toDate();
+      final dd = d.day.toString().padLeft(2, '0');
+      final mm = d.month.toString().padLeft(2, '0');
+      return '$dd/$mm/${d.year}';
+    }
+    return '';
+  }
+
+  Widget _infoBox(String text) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text),
+    );
+  }
+
+  Widget _errorBox(String text) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(text),
     );
   }
 }

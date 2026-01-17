@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
@@ -241,6 +242,108 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
       ),
     );
   }
+  Future<void> _openAsistenciaSheet(String empresaId, Evento evento) async {
+  final db = FirebaseFirestore.instance;
+
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.75,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Asistencia • ${evento.nombre}',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+
+              Expanded(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: db
+                      .collection('empresas')
+                      .doc(empresaId)
+                      .collection('eventos')
+                      .doc(evento.id)
+                      .collection('disponibilidad')
+                      .where('asignado', isEqualTo: true) // SOLO asignados
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final docs = snap.data!.docs;
+                    if (docs.isEmpty) {
+                      return const Center(
+                        child: Text('No hay trabajadores asignados todavía.'),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: docs.length,
+                      itemBuilder: (context, i) {
+                        final doc = docs[i];
+                        final data = doc.data();
+
+                        final nombre =
+                            (data['trabajadorNombre'] ?? 'Trabajador') as String;
+                        final rol = (data['trabajadorRol'] ?? '') as String;
+                        final asistio = data['asistio'] == true;
+
+                        return Card(
+                          child: ListTile(
+                            title: Text(nombre),
+                            subtitle: rol.isEmpty ? null : Text(rol),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text('Asistió'),
+                                Switch(
+                                  value: asistio,
+                                  onChanged: (v) async {
+                                    await db
+                                        .collection('empresas')
+                                        .doc(empresaId)
+                                        .collection('eventos')
+                                        .doc(evento.id)
+                                        .collection('disponibilidad')
+                                        .doc(doc.id)
+                                        .set(
+                                      {
+                                        'asistio': v,
+                                        'asistioEn':
+                                            v ? FieldValue.serverTimestamp() : null,
+                                      },
+                                      SetOptions(merge: true),
+                                    );
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 
   Widget _buildEventCard(Evento e) {
     return Card(
@@ -265,6 +368,11 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
                 MaterialPageRoute(builder: (_) => AdminAssignmentScreen(initialEvento: e)),
               ),
             ),
+            IconButton(
+              icon: const Icon(Icons.fact_check_outlined, color: Color(0xFF10B981)),
+              onPressed: () => _openAsistenciaSheet(AppConfig.empresaId, e),
+            ),
+
           ],
         ),
         onTap: () => _openEventForm(context: context, evento: e),
@@ -648,4 +756,5 @@ class _EstadoChip extends StatelessWidget {
       ),
     );
   }
+  
 }

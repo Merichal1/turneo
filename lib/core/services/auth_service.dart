@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class AuthService {
   AuthService._();
@@ -8,29 +9,185 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ==========================
-  // LOGIN / LOGOUT
-  // ==========================
-
+  // -------------------------
+  // EMAIL/PASS
+  // -------------------------
   Future<UserCredential> signIn({
     required String email,
     required String password,
-  }) async {
-    return await _auth.signInWithEmailAndPassword(
+  }) {
+    return _auth.signInWithEmailAndPassword(
       email: email.trim(),
       password: password.trim(),
     );
   }
 
-  Future<void> signOut() => _auth.signOut();
+  Future<UserCredential> registerWithEmail({
+    required String email,
+    required String password,
+  }) {
+    return _auth.createUserWithEmailAndPassword(
+      email: email.trim(),
+      password: password.trim(),
+    );
+  }
 
-  User? get currentUser => _auth.currentUser;
+  // -------------------------
+  // SIGN OUT
+  // -------------------------
+  Future<void> signOut() async {
+    await _auth.signOut();
+  }
 
-  // ==========================
-  // REGISTRO DINÁMICO (ADMIN O TRABAJADOR)
-  // ==========================
+  // -------------------------
+  // GOOGLE SIGN-IN (SIN google_sign_in)
+  // -------------------------
+  Future<UserCredential> signInWithGoogle() async {
+    final provider = GoogleAuthProvider()..addScope('email');
 
-  Future<void> registerUser({
+    if (kIsWeb) {
+      // Web
+      return _auth.signInWithPopup(provider);
+    }
+
+    // iOS/Android
+    return _auth.signInWithProvider(provider);
+  }
+
+  // -------------------------
+  // ADMIN por email en empresas/*/Administradores (campo Email/email)
+  // -------------------------
+  Future<bool> isAdminByEmail(String email) async {
+    final e = email.trim().toLowerCase();
+    if (e.isEmpty) return false;
+
+    final empresas = await _db.collection('empresas').get();
+
+    for (final emp in empresas.docs) {
+      final adminsSnap = await _db
+          .collection('empresas')
+          .doc(emp.id)
+          .collection('Administradores')
+          .get();
+
+      final match = adminsSnap.docs.any((d) {
+        final stored = (d.data()['Email'] ?? d.data()['email'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        return stored == e;
+      });
+
+      if (match) return true;
+    }
+    return false;
+  }
+
+  /// ✅ COMPAT: tu Splash lo usa (empresaId del admin por email)
+  Future<String?> getEmpresaIdForAdminEmail(String email) async {
+    final e = email.trim().toLowerCase();
+    if (e.isEmpty) return null;
+
+    final empresas = await _db.collection('empresas').get();
+
+    for (final emp in empresas.docs) {
+      final adminsSnap = await _db
+          .collection('empresas')
+          .doc(emp.id)
+          .collection('Administradores')
+          .get();
+
+      final match = adminsSnap.docs.any((d) {
+        final stored = (d.data()['Email'] ?? d.data()['email'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        return stored == e;
+      });
+
+      if (match) return emp.id;
+    }
+    return null;
+  }
+
+  // -------------------------
+  // PERFIL WORKER: existe si está en empresas/*/trabajadores/{uid}
+  // -------------------------
+  Future<bool> workerProfileExistsAnywhere(String uid) async {
+    final empresas = await _db.collection('empresas').get();
+    for (final emp in empresas.docs) {
+      final doc = await _db
+          .collection('empresas')
+          .doc(emp.id)
+          .collection('trabajadores')
+          .doc(uid)
+          .get();
+      if (doc.exists) return true;
+    }
+    return false;
+  }
+
+  Future<String?> findEmpresaIdByLicencia(String licencia) async {
+    final lic = licencia.trim();
+    if (lic.isEmpty) return null;
+
+    final q = await _db
+        .collection('empresas')
+        .where('licencia', isEqualTo: lic)
+        .limit(1)
+        .get();
+
+    if (q.docs.isEmpty) return null;
+    return q.docs.first.id;
+  }
+
+  // -------------------------
+  // CREAR / ACTUALIZAR PERFIL WORKER (SOLO en empresas/{empresaId}/trabajadores/{uid})
+  // -------------------------
+  Future<void> createOrUpdateWorkerProfile({
+    required String uid,
+    required String empresaId,
+    required String email,
+    required String nombre,
+    required String apellidos,
+    required String telefono,
+    required String ciudad,
+    required String dni,
+    required String puesto,
+    required int edad,
+    required int aniosExperiencia,
+    required bool tieneVehiculo,
+  }) async {
+    await _db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('trabajadores')
+        .doc(uid)
+        .set({
+      'activo': true,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'ciudad_lower': ciudad.trim().toLowerCase(),
+      'nombre_lower': ('$nombre $apellidos').trim().toLowerCase(),
+      'laboral': {
+        'puesto': puesto.trim(),
+        'edad': edad,
+        'añosExperiencia': aniosExperiencia,
+        'tieneVehiculo': tieneVehiculo,
+      },
+      'perfil': {
+        'nombre': nombre.trim(),
+        'apellidos': apellidos.trim(),
+        'correo': email.trim().toLowerCase(),
+        'telefono': telefono.trim(),
+        'ciudad': ciudad.trim(),
+        'dni': dni.trim(),
+      },
+      'empresaId': empresaId,
+    }, SetOptions(merge: true));
+  }
+
+  /// ✅ COMPAT: tu signup antiguo llamaba a registerWorker.
+  Future<UserCredential> registerWorker({
     required String email,
     required String password,
     required String nombre,
@@ -43,83 +200,51 @@ class AuthService {
     required int aniosExperiencia,
     required bool tieneVehiculo,
     required String licencia,
-    required String role, // 'admin' o 'worker'
   }) async {
-    final licenciaClean = licencia.trim().toLowerCase();
-
-    // 1) Buscar empresa por licencia
-    final empresasSnap = await _db
-        .collection('empresas')
-        .where('licencia', isEqualTo: licenciaClean)
-        .limit(1)
-        .get();
-
-    if (empresasSnap.docs.isEmpty) {
-      throw Exception('Licencia no válida. Consulta con tu empresa.');
+    final empresaId = await findEmpresaIdByLicencia(licencia);
+    if (empresaId == null) {
+      throw Exception('Licencia no válida. No existe empresa con esa licencia.');
     }
 
-    final empresaDoc = empresasSnap.docs.first;
-    final empresaId = empresaDoc.id;
+    final cred = await registerWithEmail(email: email, password: password);
+    final uid = cred.user?.uid;
+    if (uid == null) throw Exception('No se pudo crear el usuario (uid null).');
 
-    // 2) Crear usuario en Firebase Auth
-    final cred = await _auth.createUserWithEmailAndPassword(
-      email: email.trim(),
-      password: password.trim(),
+    await createOrUpdateWorkerProfile(
+      uid: uid,
+      empresaId: empresaId,
+      email: email,
+      nombre: nombre,
+      apellidos: apellidos,
+      telefono: telefono,
+      ciudad: ciudad,
+      dni: dni,
+      puesto: puesto,
+      edad: edad,
+      aniosExperiencia: aniosExperiencia,
+      tieneVehiculo: tieneVehiculo,
     );
 
-    final uid = cred.user!.uid;
-    final now = DateTime.now();
+    return cred;
+  }
+  Future<void> handlePostLogin() async {
+  final user = _auth.currentUser;
+  if (user == null) return;
 
-    // 3) Crear un documento en una colección global 'users' 
-    // Esto evita que los datos se "machaquen" y facilita el login
-    await _db.collection('users').doc(uid).set({
-      'uid': uid,
-      'email': email.trim(),
-      'role': role,
-      'empresaId': empresaId,
-      'nombreCompleto': '$nombre $apellidos',
-    });
+  final userDoc = await _db.collection('users').doc(user.uid).get();
 
-    // 4) Guardar en la colección específica según el rol
-    if (role == 'admin') {
-      await _db.collection('empresas').doc(empresaId).collection('administradores').doc(uid).set({
-        'nombre': nombre,
-        'apellidos': apellidos,
-        'email': email.trim(),
-        'creadoEn': Timestamp.fromDate(now),
-        'rol': 'admin',
-      });
-    } else {
-      await _db.collection('empresas').doc(empresaId).collection('trabajadores').doc(uid).set({
-        'activo': true,
-        'ciudad_lower': ciudad.toLowerCase(),
-        'creadoEn': Timestamp.fromDate(now),
-        'nombre_lower': '${nombre.toLowerCase()} ${apellidos.toLowerCase()}',
-        'perfil': {
-          'nombre': nombre,
-          'apellidos': apellidos,
-          'correo': email.trim(),
-          'telefono': telefono.trim(),
-          'ciudad': ciudad.trim(),
-          'dni': dni.trim(),
-        },
-        'laboral': {
-          'puesto': puesto,
-          'edad': edad,
-          'añosExperiencia': aniosExperiencia,
-          'tieneVehiculo': tieneVehiculo,
-        },
-        'rol': 'worker',
-      });
-    }
+  if (!userDoc.exists) {
+    return;
   }
 
-  /// Método de ayuda para obtener el rol del usuario actual al loguear
-  Future<String?> getUserRole(String uid) async {
-    final doc = await _db.collection('users').doc(uid).get();
-    if (doc.exists) {
-      return doc.data()?['role'] as String?;
-    }
-    return null;
+  final data = userDoc.data()!;
+  final empresaId = data['empresaId'];
+
+  if (empresaId == null || empresaId.toString().isEmpty) {
+    return;
   }
+
+  // usuario completo → no hacer nada, el splash/router lo manda al home
+}
+
 }
