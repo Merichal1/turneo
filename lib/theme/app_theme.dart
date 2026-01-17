@@ -1,174 +1,130 @@
-// lib/theme/app_theme.dart
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  // Paleta
-  static const _ink = Color(0xFF0E0E10);        // casi negro
-  static const _ivory = Color(0xFFF7F7F5);     // blanco cálido
-  static const _smoke = Color(0xFFEAEAE8);     // gris suave
-  static const _charcoal = Color(0xFF232325);  // gris oscuro profundo
-  static const _gold = Color(0xFFFFD400);      // acento “Glovo-ish”
-  static const _mint = Color(0xFF10B981);      // verdecito sutil para estados OK
-  static const _rose = Color(0xFFE11D48);      // acento error/alerta
+  // 🎨 Colores Turneo (los del login moderno)
+  static const Color primaryBlue = Color(0xFF2563EB);
+  static const Color bg = Color(0xFFF6F8FC);
+  static const Color textDark = Color(0xFF111827);
+  static const Color textGrey = Color(0xFF6B7280);
+  static const Color borderGrey = Color(0xFFE5E7EB);
+  static const Color inputFill = Colors.white;
 
-  // ... imports y colores iguales
+  static ThemeData get lightTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
 
-static ThemeData vogueGlovoLight = ThemeData(
-  useMaterial3: true,
-  brightness: Brightness.light,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: const Color.fromARGB(255, 86, 149, 170),
-    brightness: Brightness.light,
-    primary: const Color.fromARGB(255, 86, 149, 170),
-    onPrimary: _ink,
-    secondary: _charcoal,
-    onSecondary: _ivory,
-    surface: _ivory,
-    onSurface: _ink,
-    background: _ivory,
-    onBackground: _ink,
-    error: _rose,
-    onError: _ivory,
-  ),
-  scaffoldBackgroundColor: _ivory,
+      // Fondo general
+      scaffoldBackgroundColor: bg,
 
-  appBarTheme: const AppBarTheme(
-    backgroundColor: _ivory,
-    foregroundColor: _ink,
-    elevation: 0,
-    centerTitle: false,
-    titleTextStyle: TextStyle(
-      fontFamily: 'Serif',
-      fontWeight: FontWeight.w700,
-      fontSize: 20,
-      letterSpacing: -0.2,
-      color: _ink,
-    ),
-  ),
+      // Color principal
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: primaryBlue,
+        primary: primaryBlue,
+        background: bg,
+      ),
 
-  textTheme: const TextTheme(
-    displayLarge: TextStyle(fontFamily: 'Serif', fontWeight: FontWeight.w800, letterSpacing: -1.0),
-    displayMedium: TextStyle(fontFamily: 'Serif', fontWeight: FontWeight.w700, letterSpacing: -0.6),
-    titleLarge: TextStyle(fontFamily: 'Serif', fontWeight: FontWeight.w700),
-    titleMedium: TextStyle(fontWeight: FontWeight.w700),
-    labelLarge: TextStyle(fontWeight: FontWeight.w700),
-    bodyLarge: TextStyle(height: 1.3),
-    bodyMedium: TextStyle(height: 1.35),
-  ),
+      // Tipografía (si no tienes Inter, puedes quitar esta línea)
+      fontFamily: 'Inter',
 
-  // ⬇️ Usa CardThemeData en lugar de CardTheme
-  cardTheme: CardThemeData(
-    color: Colors.white,
-    margin: const EdgeInsets.all(0),
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-    surfaceTintColor: Colors.white,
-  ),
+      // Texto
+      textTheme: const TextTheme(
+        headlineMedium: TextStyle(
+          color: textDark,
+          fontWeight: FontWeight.w800,
+          fontSize: 28,
+        ),
+        titleLarge: TextStyle(
+          color: textDark,
+          fontWeight: FontWeight.w800,
+          fontSize: 20,
+        ),
+        bodyMedium: TextStyle(
+          color: textGrey,
+          fontSize: 16,
+        ),
+      ),
 
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: Colors.white,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: _smoke),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: _smoke),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: _gold, width: 1.4),
-    ),
-    hintStyle: const TextStyle(color: _charcoal),
-  ),
+      // Inputs como el login
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: inputFill,
+        labelStyle: const TextStyle(color: textGrey),
+        floatingLabelStyle: const TextStyle(color: primaryBlue),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
 
-  navigationBarTheme: NavigationBarThemeData(
-    indicatorColor: _gold.withOpacity(0.18),
-    backgroundColor: _ivory,
-    // ⬇️ Usa MaterialStateProperty en lugar de WidgetStateProperty
-    labelTextStyle: WidgetStateProperty.all(
-      const TextStyle(fontWeight: FontWeight.w700),
-    ),
-  ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: borderGrey),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: borderGrey),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: primaryBlue, width: 2),
+        ),
+      ),
 
-  chipTheme: ChipThemeData(
-    labelStyle: const TextStyle(fontWeight: FontWeight.w700),
-    backgroundColor: _smoke,
-    selectedColor: _gold.withOpacity(0.2),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-  ),
+      // Botón principal (ElevatedButton) como "Entrar"
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryBlue,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          minimumSize: const Size(double.infinity, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
 
-  dividerTheme: const DividerThemeData(
-    color: _smoke,
-    thickness: 1,
-    space: 24,
-  ),
+      // Botón secundario (Outlined) como "Continuar con Google / Crear cuenta"
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: primaryBlue,
+          minimumSize: const Size(double.infinity, 46),
+          side: const BorderSide(color: borderGrey),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
 
-  floatingActionButtonTheme: const FloatingActionButtonThemeData(
-    backgroundColor: _gold,
-    foregroundColor: _ink,
-    extendedTextStyle: TextStyle(fontWeight: FontWeight.w800),
-  ),
+      // TextButton (Volver)
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: primaryBlue,
+          textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+      ),
 
-  iconButtonTheme: IconButtonThemeData(
-    style: ButtonStyle(
-      shape: MaterialStateProperty.all(const CircleBorder()),
-      padding: MaterialStateProperty.all(const EdgeInsets.all(10)),
-      backgroundColor: MaterialStateProperty.resolveWith((states) {
-        if (states.contains(MaterialState.pressed)) return _gold.withOpacity(0.24);
-        return Colors.transparent;
-      }),
-    ),
-  ),
-);
+      // AppBar suave, sin fondo fuerte
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: textDark,
+        centerTitle: false,
+      ),
 
-// —— Tema oscuro
-static ThemeData vogueGlovoDark = vogueGlovoLight.copyWith(
-  brightness: Brightness.dark,
-  scaffoldBackgroundColor: _ink,
-  colorScheme: ColorScheme.fromSeed(
-    seedColor: _gold,
-    brightness: Brightness.dark,
-    primary: _gold,
-    onPrimary: _ink,
-    secondary: _ivory,
-    onSecondary: _ink,
-    surface: _charcoal,
-    onSurface: _ivory,
-    background: _ink,
-    onBackground: _ivory,
-    error: _rose,
-    onError: _ivory,
-  ),
-  appBarTheme: const AppBarTheme(backgroundColor: _ink, foregroundColor: _ivory),
-
-  // ⬇️ También CardThemeData aquí
-  cardTheme: CardThemeData(
-    color: _charcoal,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-    elevation: 0,
-  ),
-
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: _charcoal,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: Colors.white24),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: Colors.white24),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(color: _gold, width: 1.4),
-    ),
-  ),
-);
-
-  static var lightTheme;
-
+      // Cards (si quieres que todas se vean estilo login)
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+        margin: EdgeInsets.zero,
+      ),
+    );
+  }
 }

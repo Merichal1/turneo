@@ -8,7 +8,6 @@ import 'admin_notificaciones_screen.dart';
 import 'admin_payments_history_screen.dart';
 import 'admin_chat_screen.dart';
 
-
 class AdminShellScreen extends StatefulWidget {
   const AdminShellScreen({super.key});
 
@@ -19,91 +18,126 @@ class AdminShellScreen extends StatefulWidget {
 class _AdminShellScreenState extends State<AdminShellScreen> {
   int _selectedIndex = 0;
 
-  final GlobalKey<ScaffoldState> _scaffoldKey =
-      GlobalKey<ScaffoldState>(); // NUEVO
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // Orden EXACTO de las pantallas según el menú
-  final List<Widget> _pages = [
+  // ✅ Mantiene estado de cada pantalla (shell fijo, sin reconstrucciones raras)
+  late final List<Widget> _pages = [
     const AdminHomeScreen(), // 0 – Dashboard
     const AdminEventsScreen(), // 1 – Eventos
     const AdminWorkersScreen(), // 2 – Trabajadores
     const AdminNotificacionesScreen(), // 3 – Notificaciones
     const AdminChatScreen(), // 4 – Chat
-    const AdminPaymentsHistoryScreen(), // 5 – Pagos
+    const AdminPaymentsHistoryScreen(), // 5 – Gestión
     const AdminDatabaseScreen(), // 6 – Empresas
   ];
 
-@override
-Widget build(BuildContext context) {
-  return StreamBuilder<User?>(
-    stream: FirebaseAuth.instance.authStateChanges(),
-    builder: (context, snapshot) {
-      if (snapshot.connectionState == ConnectionState.waiting) {
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      }
+  // 🎨 Estilo Turneo (igual que login)
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _blue = Color(0xFF2563EB);
 
-      final user = snapshot.data;
+  @override
+  Widget build(BuildContext context) {
+    // ✅ No uses currentUser directamente: al cerrar sesión queremos reaccionar bien
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-      if (user == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-        });
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
-      }
+        final user = snap.data;
+        if (user == null) {
+          // ✅ IMPORTANTÍSIMO: manda a WELCOME o LOGIN y corta backstack
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
+            // Si tu ruta es /login en vez de /welcome:
+            // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+          });
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
 
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          final isWide = constraints.maxWidth >= 900;
-          final isCompact = constraints.maxWidth < 600;
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 900;
+            final isCompact = constraints.maxWidth < 600;
 
-          if (isWide) return _buildWideScaffold(context);
-          return _buildNarrowScaffold(context, isCompact: isCompact);
-        },
-      );
-    },
-  );
-}
+            if (isWide) return _buildWideScaffold(context, user);
+            return _buildNarrowScaffold(context, user, isCompact: isCompact);
+          },
+        );
+      },
+    );
+  }
 
-
-  // NUEVO: Layout escritorio/web: menú lateral fijo (como estaba antes)
-  Widget _buildWideScaffold(BuildContext context) {
+  // ---------------------------
+  // WIDE (web/desktop): side menu fijo
+  // ---------------------------
+  Widget _buildWideScaffold(BuildContext context, User user) {
     return Scaffold(
+      backgroundColor: _bg,
       body: Row(
         children: [
-          _buildSideMenu(context),
-          Expanded(
-            child: Container(
-              color: const Color(0xFFF5F6FA),
-              child: _pages[_selectedIndex],
+          _buildSideMenu(context, user),
+        Expanded(
+          child: Container(
+            color: const Color(0xFFF5F6FA),
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: _pages,
             ),
           ),
+        ),
         ],
       ),
     );
   }
 
-  // NUEVO: Layout móvil/tablet: Drawer + (en móvil) NavigationBar inferior
-  Widget _buildNarrowScaffold(BuildContext context, {required bool isCompact}) {
+  // ---------------------------
+  // NARROW (mobile/tablet): drawer + bottom nav (compact)
+  // ---------------------------
+  Widget _buildNarrowScaffold(BuildContext context, User user, {required bool isCompact}) {
     return Scaffold(
-      key: _scaffoldKey, // NUEVO
+      key: _scaffoldKey,
+      backgroundColor: _bg,
       drawer: Drawer(
-        child: _buildDrawerMenu(context), // NUEVO
+        child: _buildDrawerMenu(context, user),
       ),
       appBar: AppBar(
-        title: Text(_titleForIndex(_selectedIndex)), // NUEVO
+        backgroundColor: _bg,
+        elevation: 0,
+        centerTitle: false,
+        titleSpacing: 12,
+        title: Text(
+          _titleForIndex(_selectedIndex),
+          style: const TextStyle(
+            color: _textDark,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        iconTheme: const IconThemeData(color: _textDark),
       ),
-      body: Container(
-        color: const Color(0xFFF5F6FA),
-        child: _pages[_selectedIndex],
+      body: Padding(
+        padding: const EdgeInsets.all(14),
+        child: _BodyCard(
+          child: IndexedStack(
+            index: _selectedIndex,
+            children: _pages,
+          ),
+        ),
       ),
       bottomNavigationBar: isCompact
           ? NavigationBar(
-              selectedIndex: _compactNavIndex(), // NUEVO
+              selectedIndex: _compactNavIndex(),
               onDestinationSelected: (idx) {
-                // 0 Dashboard, 1 Eventos, 2 Trabajadores, 3 Más // NUEVO
                 if (idx == 3) {
-                  _scaffoldKey.currentState?.openDrawer(); // NUEVO
+                  _scaffoldKey.currentState?.openDrawer();
                   return;
                 }
                 _onItemTap(idx);
@@ -131,14 +165,11 @@ Widget build(BuildContext context) {
     );
   }
 
-  // NUEVO
   int _compactNavIndex() {
-    // Si estás en sección secundaria (notificaciones/chat/pagos/empresas), marcamos "Más".
     if (_selectedIndex <= 2) return _selectedIndex;
     return 3;
   }
 
-  // NUEVO
   String _titleForIndex(int index) {
     switch (index) {
       case 0:
@@ -153,90 +184,91 @@ Widget build(BuildContext context) {
         return 'Chat';
       case 5:
         return 'Gestión';
-      case 6:
-        return 'Empresas';
       default:
-        return 'Admin';
+        return 'Turneo';
     }
   }
 
-  // NUEVO
-  Widget _buildDrawerMenu(BuildContext context) {
+  // ---------------------------
+  // Drawer menu
+  // ---------------------------
+  Widget _buildDrawerMenu(BuildContext context, User user) {
+    final email = (user.email ?? '').trim();
+
     return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text(
-              'EventStaff Admin',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
+      child: Container(
+        color: Colors.white,
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          children: [
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: _TurneoBrandHeader(),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+
+            _drawerItem(context, icon: Icons.dashboard_outlined, label: 'Dashboard', index: 0),
+            _drawerItem(context, icon: Icons.event_outlined, label: 'Eventos', index: 1),
+            _drawerItem(context, icon: Icons.group_outlined, label: 'Trabajadores', index: 2),
+            _drawerItem(context, icon: Icons.notifications_outlined, label: 'Notificaciones', index: 3),
+            _drawerItem(context, icon: Icons.chat_bubble_outline, label: 'Chat', index: 4),
+            _drawerItem(context, icon: Icons.payments_outlined, label: 'Gestión', index: 5),
+
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+
+            ListTile(
+              leading: const CircleAvatar(
+                radius: 18,
+                backgroundColor: Color(0xFFEFF6FF),
+                child: Text(
+                  'AD',
+                  style: TextStyle(
+                    color: _blue,
+                    fontWeight: FontWeight.w800,
                   ),
+                ),
+              ),
+              title: const Text(
+                'Administrador',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text(
+                email.isEmpty ? '—' : email,
+                style: const TextStyle(color: _textGrey),
+              ),
             ),
-          ),
-          const Divider(),
-          _drawerItem(
-            context,
-            icon: Icons.dashboard_outlined,
-            label: 'Dashboard',
-            index: 0,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.event_outlined,
-            label: 'Eventos',
-            index: 1,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.group_outlined,
-            label: 'Trabajadores',
-            index: 2,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.notifications_outlined,
-            label: 'Notificaciones',
-            index: 3,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.chat_bubble_outline,
-            label: 'Chat',
-            index: 4,
-          ),
-          _drawerItem(
-            context,
-            icon: Icons.payments_outlined,
-            label: 'Gestión',
-            index: 5,
-          ),
-          const Divider(),
-          const ListTile(
-            leading: CircleAvatar(
-              radius: 16,
-              child: Text('AD'),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.logout),
+                label: const Text('Cerrar sesión'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _blue,
+                  side: const BorderSide(color: _border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () async {
+                  Navigator.of(context).pop(); // cierra drawer
+                  await FirebaseAuth.instance.signOut();
+                  if (!mounted) return;
+                  Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
+                  // Si tu ruta es /login:
+                  // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+                },
+              ),
             ),
-            title: Text('Administrador'),
-            subtitle: Text('admin@eventstaff.com'),
-          ),
-          ListTile(
-            leading: const Icon(Icons.logout, size: 20),
-            title: const Text('Cerrar sesión'),
-            onTap: () async {
-              Navigator.of(context).pop();
-              await FirebaseAuth.instance.signOut();
-              if (!mounted) return;
-              Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-            },
-          ),
-        ],
+
+            const SizedBox(height: 12),
+          ],
+        ),
       ),
     );
   }
 
-  // NUEVO
   Widget _drawerItem(
     BuildContext context, {
     required IconData icon,
@@ -244,33 +276,48 @@ Widget build(BuildContext context) {
     required int index,
   }) {
     final isSelected = _selectedIndex == index;
-    return ListTile(
-      leading: Icon(icon),
-      title: Text(label),
-      selected: isSelected,
-      selectedTileColor: Colors.black.withOpacity(0.06), // NUEVO
-      onTap: () {
-        Navigator.of(context).pop(); // NUEVO
-        _onItemTap(index);
-      },
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: ListTile(
+        leading: Icon(icon, color: isSelected ? _blue : _textGrey),
+        title: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? _textDark : _textGrey,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+        selected: isSelected,
+        selectedTileColor: const Color(0xFFEFF6FF), // azul claro
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        onTap: () {
+          Navigator.of(context).pop();
+          _onItemTap(index);
+        },
+      ),
     );
   }
 
-  Widget _buildSideMenu(BuildContext context) {
+  // ---------------------------
+  // Side menu (wide)
+  // ---------------------------
+  Widget _buildSideMenu(BuildContext context, User user) {
+    final email = (user.email ?? '').trim();
+
     return Container(
-      width: 220,
+      width: 250,
       color: Colors.white,
       child: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 24),
-            Text(
-              'EventStaff Admin',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+            const SizedBox(height: 16),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
+              child: _TurneoBrandHeader(),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 16),
+
             _SideMenuItem(
               icon: Icons.dashboard_outlined,
               label: 'Dashboard',
@@ -307,30 +354,53 @@ Widget build(BuildContext context) {
               isSelected: _selectedIndex == 5,
               onTap: () => _onItemTap(5),
             ),
-            _SideMenuItem(
-              icon: Icons.business_outlined,
-              label: 'Empresas',
-              isSelected: _selectedIndex == 6,
-              onTap: () => _onItemTap(6),
-            ),
+
             const Spacer(),
-            const Divider(),
-            const ListTile(
-              leading: CircleAvatar(
-                radius: 16,
-                child: Text('AD'),
+            const Divider(height: 1),
+
+            ListTile(
+              leading: const CircleAvatar(
+                radius: 18,
+                backgroundColor: Color(0xFFEFF6FF),
+                child: Text(
+                  'AD',
+                  style: TextStyle(
+                    color: _blue,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
-              title: Text('Administrador'),
-              subtitle: Text('admin@eventstaff.com'),
+              title: const Text(
+                'Administrador',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: Text(
+                email.isEmpty ? '—' : email,
+                style: const TextStyle(color: _textGrey),
+              ),
             ),
-            TextButton.icon(
-              onPressed: () async {
-                await FirebaseAuth.instance.signOut();
-                if (!mounted) return;
-                Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-              },
-              icon: const Icon(Icons.logout, size: 18),
-              label: const Text('Cerrar sesión'),
+
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Cerrar sesión'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _blue,
+                    side: const BorderSide(color: _border),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    await FirebaseAuth.instance.signOut();
+                    if (!mounted) return;
+                    Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
+                    // Si tu ruta es /login:
+                    // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+                  },
+                ),
+              ),
             ),
             const SizedBox(height: 16),
           ],
@@ -340,9 +410,71 @@ Widget build(BuildContext context) {
   }
 
   void _onItemTap(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
+    if (_selectedIndex == index) return; // ✅ evita rebuild extra
+    setState(() => _selectedIndex = index);
+  }
+}
+
+// ------------------------------------
+// UI pieces
+// ------------------------------------
+
+class _TurneoBrandHeader extends StatelessWidget {
+  const _TurneoBrandHeader();
+
+  static const Color _blue = Color(0xFF2563EB);
+  static const Color _textDark = Color(0xFF111827);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: _blue,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(Icons.restaurant_menu, color: Colors.white, size: 20),
+        ),
+        const SizedBox(width: 10),
+        const Text(
+          'Turneo',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+            color: _textDark,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BodyCard extends StatelessWidget {
+  final Widget child;
+  const _BodyCard({required this.child});
+
+  static const Color _card = Colors.white;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: child,
+    );
   }
 }
 
@@ -359,31 +491,36 @@ class _SideMenuItem extends StatelessWidget {
     required this.onTap,
   });
 
+  static const Color _blue = Color(0xFF2563EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+
   @override
   Widget build(BuildContext context) {
-    final bgColor = isSelected ? const Color(0xFF111827) : Colors.transparent;
-    final textColor = isSelected ? Colors.white : const Color(0xFF4B5563);
+    final bg = isSelected ? const Color(0xFFEFF6FF) : Colors.transparent;
+    final ic = isSelected ? _blue : _textGrey;
+    final tx = isSelected ? _textDark : _textGrey;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(10),
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              Icon(icon, size: 20, color: textColor),
+              Icon(icon, size: 20, color: ic),
               const SizedBox(width: 12),
               Text(
                 label,
                 style: TextStyle(
-                  color: textColor,
-                  fontWeight: FontWeight.w500,
+                  color: tx,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                 ),
               ),
             ],

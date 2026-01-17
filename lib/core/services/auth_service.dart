@@ -246,5 +246,28 @@ class AuthService {
 
   // usuario completo → no hacer nada, el splash/router lo manda al home
 }
+  // -------------------------
+  // RESET PASSWORD
+  // -------------------------
+  Future<void> sendPasswordResetEmail(String email) async {
+    final e = email.trim();
+    if (e.isEmpty) throw Exception('Email vacío');
+    await _auth.sendPasswordResetEmail(email: e);
+  }
+
+  // -------------------------
+  // (OPCIONAL) Guardar tipo de cuenta en /users/{uid}
+  // No rompe nada aunque no lo uses aún.
+  // -------------------------
+  Future<void> saveAccountTypeForCurrentUser(String accountType) async {
+    final u = _auth.currentUser;
+    if (u == null) return;
+    await _db.collection('users').doc(u.uid).set({
+      'email': (u.email ?? '').trim().toLowerCase(),
+      'accountType': accountType,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
 
 }

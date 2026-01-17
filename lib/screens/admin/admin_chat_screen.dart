@@ -14,6 +14,14 @@ class AdminChatScreen extends StatefulWidget {
 }
 
 class _AdminChatScreenState extends State<AdminChatScreen> {
+  // ====== THEME (Turneo / Login) ======
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
   final String empresaId = AppConfig.empresaId;
 
   Trabajador? _selectedWorker;
@@ -83,8 +91,8 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     await Future.delayed(const Duration(milliseconds: 150));
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent + 60,
-        duration: const Duration(milliseconds: 200),
+        _scrollController.position.maxScrollExtent + 80,
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     }
@@ -95,18 +103,18 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     final currentUser = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: _bg,
+        elevation: 0,
+        surfaceTintColor: _bg,
         title: const Text(
-          'Chat (Admin)',
+          'Chat',
           style: TextStyle(
-            color: Color(0xFF111827),
-            fontWeight: FontWeight.w600,
+            color: _textDark,
+            fontWeight: FontWeight.w900,
           ),
         ),
-        centerTitle: false,
         actions: [
           if (currentUser != null)
             Padding(
@@ -116,287 +124,474 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
                   currentUser.email ?? '',
                   style: const TextStyle(
                     fontSize: 11,
-                    color: Color(0xFF6B7280),
+                    color: _textGrey,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
             ),
         ],
       ),
-      body: Row(
-        children: [
-          // Panel izquierdo: lista de trabajadores + buscador
-          SizedBox(
-            width: 260,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 900;
+
+          if (isWide) {
+            // ===== WEB / ESCRITORIO =====
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 320,
+                    child: _WorkersPanel(
+                      empresaId: empresaId,
+                      chatsCollection: _chatsCollection,
+                      selectedWorker: _selectedWorker,
+                      searchText: _searchText,
+                      onSearchChanged: (v) => setState(() => _searchText = v),
+                      onSelectWorker: (t) => setState(() => _selectedWorker = t),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _ConversationPanel(
+                      empresaId: empresaId,
+                      selectedWorker: _selectedWorker,
+                      scrollController: _scrollController,
+                      messageController: _messageController,
+                      onSend: _sendMessage,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // ===== MÓVIL / TABLET =====
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
             child: Column(
               children: [
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: TextField(
-                    decoration: InputDecoration(
-                      isDense: true,
-                      prefixIcon: const Icon(Icons.search, size: 18),
-                      hintText: 'Buscar trabajador...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                    ),
-                    onChanged: (value) {
-                      setState(() {
-                        _searchText = value.toLowerCase();
-                      });
-                    },
-                  ),
+                // Barra superior: seleccionar trabajador
+                _MobileTopBar(
+                  selectedWorker: _selectedWorker,
+                  onTapSelect: () => _openWorkersSheet(context),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Expanded(
-                  child: StreamBuilder<List<Trabajador>>(
-                    stream: FirestoreService.instance.listenTrabajadores(empresaId),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState ==
-                              ConnectionState.waiting &&
-                          !snapshot.hasData) {
-                        return const Center(
-                          child: CircularProgressIndicator(),
-                        );
-                      }
-
-                      final trabajadores = (snapshot.data ?? [])
-                          .where((t) {
-                            final nombre =
-                                ('${t.nombre ?? ''} ${t.apellidos ?? ''}')
-                                    .toLowerCase();
-                            if (_searchText.isEmpty) return true;
-                            return nombre.contains(_searchText);
-                          })
-                          .toList();
-
-                      if (trabajadores.isEmpty) {
-                        return const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Text(
-                              'No hay trabajadores que coincidan con la búsqueda.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: Color(0xFF6B7280),
-                              ),
-                            ),
-                          ),
-                        );
-                      }
-
-                      return ListView.separated(
-                        itemCount: trabajadores.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 4),
-                        itemBuilder: (context, index) {
-                          final t = trabajadores[index];
-                          final isSelected = _selectedWorker?.id == t.id;
-                          final nombre =
-                              ('${t.nombre ?? ''} ${t.apellidos ?? ''}')
-                                  .trim();
-                          final rol = t.puesto ?? '';
-
-                          return StreamBuilder<
-                              DocumentSnapshot<Map<String, dynamic>>>(
-                            stream: _chatsCollection.doc(t.id).snapshots(),
-                            builder: (context, chatSnap) {
-                              String lastMsg = '';
-                              String timeText = '';
-                              int unreadCount = 0; // lo podríamos usar más tarde
-
-                              if (chatSnap.hasData &&
-                                  chatSnap.data!.exists) {
-                                final data = chatSnap.data!.data() ?? {};
-                                lastMsg =
-                                    (data['ultimoMensaje'] as String?) ?? '';
-                                final ts = data['ultimoMensajeEn']
-                                    as Timestamp?;
-                                if (ts != null) {
-                                  final dt = ts.toDate();
-                                  final h = dt.hour
-                                      .toString()
-                                      .padLeft(2, '0');
-                                  final m = dt.minute
-                                      .toString()
-                                      .padLeft(2, '0');
-                                  timeText = '$h:$m';
-                                }
-                              }
-
-                              return InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _selectedWorker = t;
-                                  });
-                                },
-                                child: Container(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 2,
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isSelected
-                                        ? const Color(0xFF111827)
-                                            .withOpacity(0.05)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 18,
-                                        child: Text(
-                                          nombre.isNotEmpty
-                                              ? nombre[0].toUpperCase()
-                                              : '?',
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              nombre.isEmpty
-                                                  ? 'Sin nombre'
-                                                  : nombre,
-                                              maxLines: 1,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                                color: isSelected
-                                                    ? const Color(
-                                                        0xFF111827)
-                                                    : const Color(
-                                                        0xFF111827),
-                                              ),
-                                            ),
-                                            if (rol.isNotEmpty)
-                                              Text(
-                                                rol,
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: Color(0xFF6B7280),
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow
-                                                    .ellipsis,
-                                              ),
-                                            if (lastMsg.isNotEmpty)
-                                              Text(
-                                                lastMsg,
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: Color(0xFF9CA3AF),
-                                                ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow
-                                                    .ellipsis,
-                                              ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.end,
-                                        children: [
-                                          if (timeText.isNotEmpty)
-                                            Text(
-                                              timeText,
-                                              style: const TextStyle(
-                                                fontSize: 10,
-                                                color: Color(0xFFA1A1AA),
-                                              ),
-                                            ),
-                                          if (unreadCount > 0)
-                                            Container(
-                                              margin:
-                                                  const EdgeInsets.only(
-                                                top: 4,
-                                              ),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 2,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color:
-                                                    const Color(0xFF111827),
-                                                borderRadius:
-                                                    BorderRadius.circular(
-                                                        999),
-                                              ),
-                                              child: Text(
-                                                '$unreadCount',
-                                                style: const TextStyle(
-                                                  fontSize: 10,
-                                                  color: Colors.white,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
+                  child: _ConversationPanel(
+                    empresaId: empresaId,
+                    selectedWorker: _selectedWorker,
+                    scrollController: _scrollController,
+                    messageController: _messageController,
+                    onSend: _sendMessage,
                   ),
                 ),
               ],
             ),
-          ),
+          );
+        },
+      ),
+    );
+  }
 
-          const VerticalDivider(width: 1),
-
-          // Panel derecho: conversación
-          Expanded(
-            child: _selectedWorker == null
-                ? const Center(
-                    child: Text(
-                      'Selecciona un trabajador para empezar a chatear.',
-                      style: TextStyle(
-                        color: Color(0xFF6B7280),
-                      ),
+  Future<void> _openWorkersSheet(BuildContext context) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.82,
+              child: Column(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFCBD5E1),
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                  )
-                : Column(
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
                     children: [
-                      // Cabecera de la conversación
-                      _ChatHeader(worker: _selectedWorker!),
-                      const Divider(height: 1),
-                      // Mensajes
-                      Expanded(
-                        child: _ChatMessages(
-                          empresaId: empresaId,
-                          worker: _selectedWorker!,
-                          scrollController: _scrollController,
+                      const Text(
+                        'Trabajadores',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          color: _textDark,
                         ),
                       ),
-                      // Input
-                      _ChatInput(
-                        controller: _messageController,
-                        onSend: _sendMessage,
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: _WorkersPanel(
+                      empresaId: empresaId,
+                      chatsCollection: _chatsCollection,
+                      selectedWorker: _selectedWorker,
+                      searchText: _searchText,
+                      onSearchChanged: (v) => setState(() => _searchText = v),
+                      onSelectWorker: (t) {
+                        setState(() => _selectedWorker = t);
+                        Navigator.of(context).pop();
+                      },
+                      compact: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ======================================================
+// WORKERS PANEL (lista izquierda / bottomsheet en móvil)
+// ======================================================
+
+class _WorkersPanel extends StatelessWidget {
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final String empresaId;
+  final CollectionReference<Map<String, dynamic>> chatsCollection;
+  final Trabajador? selectedWorker;
+  final String searchText;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<Trabajador> onSelectWorker;
+  final bool compact;
+
+  const _WorkersPanel({
+    required this.empresaId,
+    required this.chatsCollection,
+    required this.selectedWorker,
+    required this.searchText,
+    required this.onSearchChanged,
+    required this.onSelectWorker,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+            child: Column(
+              children: [
+                Row(
+                  children: const [
+                    Icon(Icons.people_alt_outlined, size: 18, color: _textDark),
+                    SizedBox(width: 8),
+                    Text(
+                      'Trabajadores',
+                      style: TextStyle(
+                        color: _textDark,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    hintText: 'Buscar trabajador...',
+                    filled: true,
+                    fillColor: const Color(0xFFF9FAFB),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _blue, width: 2),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  onChanged: (value) => onSearchChanged(value.toLowerCase()),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: _border),
+          Expanded(
+            child: StreamBuilder<List<Trabajador>>(
+              stream: FirestoreService.instance.listenTrabajadores(empresaId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final trabajadores = (snapshot.data ?? []).where((t) {
+                  final nombre = ('${t.nombre ?? ''} ${t.apellidos ?? ''}').toLowerCase();
+                  if (searchText.isEmpty) return true;
+                  return nombre.contains(searchText);
+                }).toList();
+
+                if (trabajadores.isEmpty) {
+                  return const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        'No hay trabajadores que coincidan con la búsqueda.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: trabajadores.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final t = trabajadores[index];
+                    final isSelected = selectedWorker?.id == t.id;
+                    final nombre = ('${t.nombre ?? ''} ${t.apellidos ?? ''}').trim();
+                    final rol = t.puesto ?? '';
+
+                    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: chatsCollection.doc(t.id).snapshots(),
+                      builder: (context, chatSnap) {
+                        String lastMsg = '';
+                        String timeText = '';
+
+                        if (chatSnap.hasData && chatSnap.data!.exists) {
+                          final data = chatSnap.data!.data() ?? {};
+                          lastMsg = (data['ultimoMensaje'] as String?) ?? '';
+                          final ts = data['ultimoMensajeEn'] as Timestamp?;
+                          if (ts != null) {
+                            final dt = ts.toDate();
+                            final h = dt.hour.toString().padLeft(2, '0');
+                            final m = dt.minute.toString().padLeft(2, '0');
+                            timeText = '$h:$m';
+                          }
+                        }
+
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => onSelectWorker(t),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: isSelected ? const Color(0xFFBFDBFE) : _border),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: isSelected ? const Color(0xFFDBEAFE) : const Color(0xFFE5E7EB),
+                                  child: Text(
+                                    _initial(nombre),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      color: _textDark,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        nombre.isEmpty ? 'Sin nombre' : nombre,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w900,
+                                          color: _textDark,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      if (rol.isNotEmpty)
+                                        Text(
+                                          rol,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: _textGrey,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      if (lastMsg.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          lastMsg,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: Color(0xFF94A3B8),
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                if (timeText.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    timeText,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Color(0xFF94A3B8),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _initial(String nombreCompleto) {
+    if (nombreCompleto.trim().isEmpty) return '?';
+    return nombreCompleto.trim()[0].toUpperCase();
+  }
+}
+
+// =============================
+// CONVERSATION PANEL (derecha)
+// =============================
+
+class _ConversationPanel extends StatelessWidget {
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final String empresaId;
+  final Trabajador? selectedWorker;
+  final ScrollController scrollController;
+  final TextEditingController messageController;
+  final VoidCallback onSend;
+
+  const _ConversationPanel({
+    required this.empresaId,
+    required this.selectedWorker,
+    required this.scrollController,
+    required this.messageController,
+    required this.onSend,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (selectedWorker == null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: _border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 24,
+              offset: Offset(0, 10),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Selecciona un trabajador para empezar a chatear.',
+              style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _ChatHeader(worker: selectedWorker!),
+          const Divider(height: 1, color: _border),
+          Expanded(
+            child: _ChatMessages(
+              empresaId: empresaId,
+              worker: selectedWorker!,
+              scrollController: scrollController,
+            ),
+          ),
+          const Divider(height: 1, color: _border),
+          _ChatInput(
+            controller: messageController,
+            onSend: onSend,
           ),
         ],
       ),
@@ -405,25 +600,31 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
 }
 
 class _ChatHeader extends StatelessWidget {
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+
   final Trabajador worker;
 
   const _ChatHeader({required this.worker});
 
   @override
   Widget build(BuildContext context) {
-    final nombre =
-        ('${worker.nombre ?? ''} ${worker.apellidos ?? ''}').trim();
+    final nombre = ('${worker.nombre ?? ''} ${worker.apellidos ?? ''}').trim();
     final rol = worker.puesto ?? '';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: Colors.white,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Row(
         children: [
           CircleAvatar(
             radius: 18,
+            backgroundColor: const Color(0xFFEFF6FF),
             child: Text(
               nombre.isNotEmpty ? nombre[0].toUpperCase() : '?',
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                color: _textDark,
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -435,7 +636,8 @@ class _ChatHeader extends StatelessWidget {
                   nombre.isEmpty ? 'Trabajador' : nombre,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w900,
+                    color: _textDark,
                   ),
                 ),
                 if (rol.isNotEmpty)
@@ -443,7 +645,8 @@ class _ChatHeader extends StatelessWidget {
                     rol,
                     style: const TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF6B7280),
+                      color: _textGrey,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
               ],
@@ -456,6 +659,8 @@ class _ChatHeader extends StatelessWidget {
 }
 
 class _ChatMessages extends StatelessWidget {
+  static const Color _blue = Color(0xFF2563EB);
+
   final String empresaId;
   final Trabajador worker;
   final ScrollController scrollController;
@@ -479,8 +684,7 @@ class _ChatMessages extends StatelessWidget {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: mensajesColl.orderBy('creadoEn').snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
@@ -489,12 +693,13 @@ class _ChatMessages extends StatelessWidget {
         if (docs.isEmpty) {
           return const Center(
             child: Padding(
-              padding: EdgeInsets.all(16.0),
+              padding: EdgeInsets.all(16),
               child: Text(
                 'No hay mensajes todavía.\nEscribe el primer mensaje al trabajador.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -503,7 +708,7 @@ class _ChatMessages extends StatelessWidget {
 
         return ListView.builder(
           controller: scrollController,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final data = docs[index].data();
@@ -521,45 +726,52 @@ class _ChatMessages extends StatelessWidget {
             final isMe = enviadoPor == 'admin';
 
             return Align(
-              alignment:
-                  isMe ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                margin: const EdgeInsets.symmetric(vertical: 4),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
+              alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+              child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.5,
+                  maxWidth: MediaQuery.of(context).size.width * 0.72,
                 ),
-                decoration: BoxDecoration(
-                  color: isMe
-                      ? const Color(0xFF2563EB)
-                      : const Color(0xFFE5E7EB),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: isMe
-                      ? CrossAxisAlignment.end
-                      : CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      texto,
-                      style: TextStyle(
-                        color: isMe ? Colors.white : Colors.black,
-                        fontSize: 14,
-                      ),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isMe ? _blue : const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(16),
+                      topRight: const Radius.circular(16),
+                      bottomLeft: Radius.circular(isMe ? 16 : 6),
+                      bottomRight: Radius.circular(isMe ? 6 : 16),
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      timeText,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color:
-                            isMe ? Colors.white70 : Colors.black54,
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 10,
+                        offset: Offset(0, 6),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        texto,
+                        style: TextStyle(
+                          color: isMe ? Colors.white : const Color(0xFF111827),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        timeText,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isMe ? Colors.white70 : Colors.black54,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -571,6 +783,9 @@ class _ChatMessages extends StatelessWidget {
 }
 
 class _ChatInput extends StatelessWidget {
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _blue = Color(0xFF2563EB);
+
   final TextEditingController controller;
   final VoidCallback onSend;
 
@@ -581,22 +796,18 @@ class _ChatInput extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: Colors.white,
-      padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       child: Row(
         children: [
           Expanded(
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 4,
-              ),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3F4F6),
-                borderRadius: BorderRadius.circular(10),
+                color: const Color(0xFFF9FAFB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _border),
               ),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               child: TextField(
                 controller: controller,
                 minLines: 1,
@@ -608,13 +819,104 @@ class _ChatInput extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: onSend,
-            icon: const Icon(Icons.send),
-            color: const Color(0xFF2563EB),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _blue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                padding: EdgeInsets.zero,
+                elevation: 0,
+              ),
+              onPressed: onSend,
+              child: const Icon(Icons.send, size: 18),
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ============================
+// MÓVIL: barra superior
+// ============================
+
+class _MobileTopBar extends StatelessWidget {
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+
+  final Trabajador? selectedWorker;
+  final VoidCallback onTapSelect;
+
+  const _MobileTopBar({
+    required this.selectedWorker,
+    required this.onTapSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final nombre = selectedWorker == null
+        ? 'Seleccionar trabajador'
+        : ('${selectedWorker!.nombre ?? ''} ${selectedWorker!.apellidos ?? ''}').trim();
+
+    final rol = selectedWorker?.puesto ?? '';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onTapSelect,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 24,
+              offset: Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.people_alt_outlined, color: _textDark),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    nombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _textDark,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  if (selectedWorker != null && rol.isNotEmpty)
+                    Text(
+                      rol,
+                      style: const TextStyle(
+                        color: _textGrey,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.expand_more, color: _textGrey),
+          ],
+        ),
       ),
     );
   }

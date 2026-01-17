@@ -1,11 +1,7 @@
-import 'package:flutter/material.dart';
-import 'package:turneo/screens/Login/login_screen.dart';
-import 'package:flutter/material.dart';
-import 'package:turneo/screens/Signup/signup_screen.dart';
-import '../../routes/app_routes.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
-
-
+import 'package:flutter/material.dart';
+import '../../routes/app_routes.dart';
+import '../../core/services/auth_service.dart';
 
 class TurneoStartScreen extends StatelessWidget {
   const TurneoStartScreen({super.key});
@@ -15,89 +11,49 @@ class TurneoStartScreen extends StatelessWidget {
     final size = MediaQuery.of(context).size;
     final w = size.width;
 
-    final isWide = w >= 1000;       // web “real”
-    final isMedium = w >= 700;      // tablet / ventana mediana
+    final isWide = w >= 1000;
+    final showApple = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F8FC),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isWide ? 28 : 18,
-                vertical: isWide ? 22 : 14,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF2F6BFF), Color(0xFF8B3DFF)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Padding(
+                padding: const EdgeInsets.all(28),
+                child: isWide
+                    ? Row(
+                        children: [
+                          const Expanded(flex: 6, child: _LeftMarketing()),
+                          const SizedBox(width: 28),
+                          Expanded(
+                            flex: 5,
+                            child: _RightCard(showApple: showApple),
+                          ),
+                        ],
+                      )
+                    : SingleChildScrollView(
+                        child: Column(
+                          children: [
+                            const _LeftMarketing(compact: true),
+                            const SizedBox(height: 18),
+                            _RightCard(showApple: showApple),
+                          ],
+                        ),
+                      ),
               ),
-              child: isWide
-                  ? _WideLayout()
-                  : isMedium
-                      ? const _MediumLayout()
-                      : const _NarrowLayout(),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-/// ✅ WEB: dos columnas, pero con proporción 60/40 y la tarjeta centrada verticalmente
-class _WideLayout extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: const [
-        Expanded(flex: 6, child: _LeftMarketing()),
-        SizedBox(width: 32),
-        Expanded(flex: 4, child: _RightAuthCentered()),
-      ],
-    );
-  }
-}
-
-/// ✅ TABLET: dos columnas pero más compactas
-class _MediumLayout extends StatelessWidget {
-  const _MediumLayout();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: const [
-        Expanded(flex: 5, child: _LeftMarketing(compact: true)),
-        SizedBox(width: 20),
-        Expanded(flex: 5, child: _RightAuthCentered()),
-      ],
-    );
-  }
-}
-
-/// ✅ MÓVIL: columna con scroll
-class _NarrowLayout extends StatelessWidget {
-  const _NarrowLayout();
-
-  @override
-  Widget build(BuildContext context) {
-    return const SingleChildScrollView(
-      child: Column(
-        children: [
-          _LeftMarketing(compact: true),
-          SizedBox(height: 18),
-          _AuthCard(maxWidth: 520),
-        ],
-      ),
-    );
-  }
-}
-
-/// ✅ Columna derecha: centra la tarjeta verticalmente en web
-class _RightAuthCentered extends StatelessWidget {
-  const _RightAuthCentered();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: _AuthCard(maxWidth: 520),
     );
   }
 }
@@ -108,11 +64,10 @@ class _LeftMarketing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleSize = compact ? 36.0 : 52.0;
-    final subSize = compact ? 15.0 : 16.0;
+    final titleSize = compact ? 34.0 : 52.0;
 
     return Align(
-      alignment: Alignment.topLeft,
+      alignment: Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 650),
         child: Column(
@@ -124,7 +79,11 @@ class _LeftMarketing extends StatelessWidget {
                 SizedBox(width: 12),
                 Text(
                   'Turneo',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
                 ),
               ],
             ),
@@ -135,18 +94,19 @@ class _LeftMarketing extends StatelessWidget {
                 fontSize: titleSize,
                 fontWeight: FontWeight.w900,
                 height: 1.05,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 14),
-            Text(
-              'La plataforma completa para administrar tu equipo, eventos y horarios en el sector de la hostelería.',
+            const Text(
+              'La plataforma completa para administrar tu equipo, eventos y horarios en el sector de la hostelería de manera eficiente y profesional.',
               style: TextStyle(
-                fontSize: subSize,
-                height: 1.4,
-                color: const Color(0xFF556070),
+                color: Colors.white70,
+                fontWeight: FontWeight.w600,
+                height: 1.5,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
             const _Feature(
               icon: Icons.people_outline,
               title: 'Gestión de Personal',
@@ -164,6 +124,11 @@ class _LeftMarketing extends StatelessWidget {
               title: 'Seguimiento en Tiempo Real',
               subtitle: 'Monitorea el rendimiento y la disponibilidad',
             ),
+            const SizedBox(height: 18),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+            ),
           ],
         ),
       ),
@@ -171,107 +136,76 @@ class _LeftMarketing extends StatelessWidget {
   }
 }
 
-class _AuthCard extends StatelessWidget {
-  final double maxWidth;
-  const _AuthCard({required this.maxWidth});
+class _RightCard extends StatelessWidget {
+  final bool showApple;
+  const _RightCard({required this.showApple});
 
   @override
-  
   Widget build(BuildContext context) {
-    final showApple = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: Container(
-        padding: const EdgeInsets.all(22),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x14000000),
-              blurRadius: 24,
-              offset: Offset(0, 10),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Bienvenido',
-              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Inicia sesión o crea una cuenta para comenzar',
-              style: TextStyle(color: Color(0xFF6B7280)),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 18),
-
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LoginScreenModern()),
-                  );
-                },
-                child: const Text('Iniciar Sesión'),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Container(
+          padding: const EdgeInsets.all(26),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x1A000000),
+                blurRadius: 30,
+                offset: Offset(0, 14),
               ),
-            ),
-
-            const SizedBox(height: 12),
-
-            SizedBox(
-              width: double.infinity,
-              height: 46,
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF2563EB),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  side: const BorderSide(color: Color(0xFFE5E7EB)),
-                ),
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SignUpScreen()),
-                  );
-                },
-                child: const Text('Crear Cuenta'),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Bienvenido',
+                style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900),
               ),
-            ),
-            if (showApple) ...[
-  const SizedBox(height: 12),
-  SizedBox(
-    width: double.infinity,
-    height: 46,
-    child: OutlinedButton(
-      style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.black,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
-      ),
-      onPressed: () {
-        // por ahora, lo dejamos como placeholder o lo conectamos cuando lo implementes
-      },
-      child: const Text('Continuar con Apple'),
-    ),
-  ),
-],
+              const SizedBox(height: 8),
+              const Text(
+                'Comienza a optimizar la gestión de tu equipo hoy mismo',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.black54, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 18),
 
-          ],
+              // Crear cuenta
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => Navigator.pushNamed(context, Routes.registerZip),
+                  child: const Text('Crear Cuenta', style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Ya tengo cuenta
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    side: const BorderSide(color: Color(0xFFE5E7EB)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => Navigator.pushNamed(context, Routes.loginZip),
+                  child: const Text('Iniciar sesión', style: TextStyle(fontWeight: FontWeight.w800)),
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
+          ),
         ),
       ),
     );
@@ -283,11 +217,7 @@ class _Feature extends StatelessWidget {
   final String title;
   final String subtitle;
 
-  const _Feature({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-  });
+  const _Feature({required this.icon, required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
@@ -297,23 +227,40 @@ class _Feature extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: const Color(0xFFEEF2FF),
+            color: Colors.white.withOpacity(0.16),
             borderRadius: BorderRadius.circular(14),
           ),
-          child: Icon(icon, color: const Color(0xFF2563EB)),
+          child: Icon(icon, color: Colors.white),
         ),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+              Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
               const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(color: Color(0xFF6B7280))),
+              Text(subtitle, style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
       ],
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  final String text;
+  const _Pill(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(text, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
     );
   }
 }
@@ -324,13 +271,13 @@ class _Logo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 44,
-      height: 44,
+      width: 46,
+      height: 46,
       decoration: BoxDecoration(
-        color: const Color(0xFF2563EB),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(14),
       ),
-      child: const Icon(Icons.restaurant_menu, color: Colors.white),
+      child: const Icon(Icons.restaurant_menu, color: Color(0xFF2F6BFF)),
     );
   }
 }

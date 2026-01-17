@@ -12,8 +12,19 @@ class AdminWorkersScreen extends StatefulWidget {
 }
 
 class _AdminWorkersScreenState extends State<AdminWorkersScreen> {
+  // 🎨 Turneo style
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
   final TextEditingController _searchController = TextEditingController();
   String _searchTerm = '';
+
+  // (UI) filtro estilo “Todos / Activos / De baja”
+  int _statusFilter = 0; // 0 todos, 1 activos, 2 baja/inactivos
 
   @override
   void dispose() {
@@ -31,36 +42,37 @@ class _AdminWorkersScreenState extends State<AdminWorkersScreen> {
         .collection('trabajadores')
         .orderBy('nombre_lower')
         .snapshots()
-        .map(
-          (snap) => snap.docs
-              .map((d) => Trabajador.fromFirestore(d))
-              .toList(),
-        );
+        .map((snap) => snap.docs.map((d) => Trabajador.fromFirestore(d)).toList());
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0.5,
+        backgroundColor: _bg,
+        elevation: 0,
+        surfaceTintColor: _bg,
         title: const Text(
-          'Trabajadores',
+          'Gestión de Personal',
           style: TextStyle(
-            color: Color(0xFF111827),
-            fontWeight: FontWeight.w600,
+            color: _textDark,
+            fontWeight: FontWeight.w900,
           ),
         ),
         centerTitle: false,
       ),
       floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: _blue,
+        foregroundColor: Colors.white,
         onPressed: () => _openWorkerForm(context: context),
         icon: const Icon(Icons.add),
-        label: const Text('Nuevo'),
+        label: const Text(
+          'Añadir Personal',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
       body: StreamBuilder<List<Trabajador>>(
         stream: stream,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
@@ -77,421 +89,231 @@ class _AdminWorkersScreenState extends State<AdminWorkersScreen> {
 
           final todos = snapshot.data ?? [];
 
-          // ===== FILTRADO POR NOMBRE =====
-          final trabajadores = _searchTerm.isEmpty
+          // ===== FILTRADO POR NOMBRE (MISMA FUNCIONALIDAD) =====
+          var trabajadores = _searchTerm.isEmpty
               ? todos
-              : todos
-                  .where(
-                    (t) => t.nombreCompleto
-                        .toLowerCase()
-                        .contains(_searchTerm),
-                  )
-                  .toList();
+              : todos.where((t) => t.nombreCompleto.toLowerCase().contains(_searchTerm)).toList();
+
+          // ===== FILTRADO POR ESTADO (SOLO UI) =====
+          if (_statusFilter == 1) {
+            trabajadores = trabajadores.where((t) => t.activo == true).toList();
+          } else if (_statusFilter == 2) {
+            trabajadores = trabajadores.where((t) => t.activo == false).toList();
+          }
 
           if (trabajadores.isEmpty) {
             return const Center(
               child: Text(
-                'No se han encontrado trabajadores con ese nombre.\n'
+                'No se han encontrado trabajadores.\n'
                 'Prueba a cambiar el filtro o añade uno nuevo.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Color(0xFF6B7280),
-                ),
+                style: TextStyle(color: _textGrey),
               ),
             );
           }
 
-          return Column(
-            children: [
-              // ===== BARRA DE BÚSQUEDA =====
-              Container(
-                color: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Lista de usuarios',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF111827),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 260,
-                      child: TextField(
-                        controller: _searchController,
-                        onChanged: (value) {
-                          setState(() {
-                            _searchTerm = value.trim().toLowerCase();
-                          });
-                        },
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: 'Buscar por nombre...',
-                          prefixIcon: const Icon(Icons.search, size: 18),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          contentPadding:
-                              const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, thickness: 1),
-              // ===== CABECERA TIPO TABLA =====
-              Container(
-                color: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                child: Row(
-                  children: const [
-                    SizedBox(
-                      width: 260,
-                      child: Text(
-                        'Nombre / Correo',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        'Ciudad',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        'Puesto',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 70,
-                      child: Text(
-                        'Edad',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 90,
-                      child: Text(
-                        'Años exp.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        'DNI',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 130,
-                      child: Text(
-                        'Teléfono',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 80,
-                      child: Text(
-                        'Vehículo',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6B7280),
-                        ),
-                      ),
-                    ),
-                    SizedBox(width: 48), // iconos editar/borrar
-                  ],
-                ),
-              ),
-              const Divider(height: 1, thickness: 1),
-              // ===== LISTA DE FILAS =====
-              Expanded(
-                child: ListView.separated(
-                  itemCount: trabajadores.length,
-                  separatorBuilder: (_, __) =>
-                      const Divider(height: 1, thickness: 0.4),
-                  itemBuilder: (context, index) {
-                    final t = trabajadores[index];
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 980;
+              final isMedium = constraints.maxWidth >= 700 && constraints.maxWidth < 980;
 
-                    final rowColor = index.isEven
-                        ? const Color(0xFFFFFFFF)
-                        : const Color(0xFFF9FAFB);
+              final columns = isWide ? 3 : (isMedium ? 2 : 1);
 
-                    return InkWell(
-                      onTap: () => _openWorkerForm(
-                        context: context,
-                        trabajador: t,
+              return Column(
+                children: [
+                  // ===== HEADER: buscador + filtros =====
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                    child: _HeaderControls(
+                      searchController: _searchController,
+                      onSearchChanged: (value) {
+                        setState(() => _searchTerm = value.trim().toLowerCase());
+                      },
+                      statusFilter: _statusFilter,
+                      onStatusChanged: (v) => setState(() => _statusFilter = v),
+                    ),
+                  ),
+
+                  // ===== GRID/LISTA DE TARJETAS =====
+                  Expanded(
+                    child: GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        // altura similar a tu mock
+                        childAspectRatio: columns == 1 ? 1.65 : 1.55,
                       ),
-                      child: Container(
-                        color: rowColor,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            // Nombre + correo + estado
-                            SizedBox(
-                              width: 260,
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 18,
-                                    backgroundColor: const Color(0xFFE5E7EB),
-                                    child: Text(
-                                      _initials(t.nombre, t.apellidos),
-                                      style: const TextStyle(
-                                        color: Color(0xFF111827),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
+                      itemCount: trabajadores.length,
+                      itemBuilder: (context, index) {
+                        final t = trabajadores[index];
+                        return _WorkerCard(
+                          trabajador: t,
+                          onTap: () => _openWorkerForm(context: context, trabajador: t),
+                          onEdit: () => _openWorkerForm(context: context, trabajador: t),
+                          onDelete: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                title: const Text('Eliminar trabajador'),
+                                content: Text('¿Seguro que quieres eliminar a "${t.nombreCompleto}"?'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context, false),
+                                    child: const Text('Cancelar'),
                                   ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                t.nombreCompleto,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Color(0xFF111827),
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 4),
-                                            _ActivoChip(activo: t.activo),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          t.correo,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: Color(0xFF6B7280),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context, true),
+                                    style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                    child: const Text('Eliminar'),
                                   ),
                                 ],
                               ),
-                            ),
-                            // Ciudad
-                            SizedBox(
-                              width: 120,
-                              child: Text(
-                                t.ciudad.isNotEmpty ? t.ciudad : '-',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // Puesto
-                            SizedBox(
-                              width: 120,
-                              child: Text(
-                                t.puesto.isNotEmpty ? t.puesto : '-',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // Edad
-                            SizedBox(
-                              width: 70,
-                              child: Text(
-                                t.edad > 0 ? '${t.edad}' : '-',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // Años experiencia
-                            SizedBox(
-                              width: 90,
-                              child: Text(
-                                t.aniosExperiencia > 0
-                                    ? '${t.aniosExperiencia}'
-                                    : '-',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // DNI
-                            SizedBox(
-                              width: 120,
-                              child: Text(
-                                t.dni.isNotEmpty ? t.dni : '-',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // Teléfono
-                            SizedBox(
-                              width: 130,
-                              child: Text(
-                                t.telefono.isNotEmpty ? t.telefono : '-',
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF4B5563),
-                                ),
-                              ),
-                            ),
-                            // Vehículo
-                            SizedBox(
-                              width: 80,
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    t.tieneVehiculo
-                                        ? Icons.directions_car
-                                        : Icons.close,
-                                    size: 18,
-                                    color: t.tieneVehiculo
-                                        ? const Color(0xFF15803D)
-                                        : const Color(0xFF9CA3AF),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    t.tieneVehiculo ? 'Sí' : 'No',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Color(0xFF4B5563),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            // Icono editar
-                            IconButton(
-                              onPressed: () => _openWorkerForm(
-                                context: context,
-                                trabajador: t,
-                              ),
-                              icon: const Icon(Icons.edit_outlined, size: 20),
-                              tooltip: 'Editar',
-                            ),
-                            // Icono borrar
-                            IconButton(
-                              onPressed: () async {
-                                final confirmed = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Eliminar trabajador'),
-                                    content: Text(
-                                      '¿Seguro que quieres eliminar a "${t.nombreCompleto}"?',
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(context, false),
-                                        child: const Text('Cancelar'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(context, true),
-                                        style: TextButton.styleFrom(
-                                          foregroundColor: Colors.red,
-                                        ),
-                                        child: const Text('Eliminar'),
-                                      ),
-                                    ],
-                                  ),
+                            );
+
+                            if (confirmed == true) {
+                              await _deleteWorker(empresaId: empresaId, trabajadorId: t.id);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Trabajador "${t.nombreCompleto}" eliminado')),
                                 );
-                                if (confirmed == true) {
-                                  await _deleteWorker(
-                                    empresaId: empresaId,
-                                    trabajadorId: t.id,
-                                  );
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          'Trabajador "${t.nombreCompleto}" eliminado',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
-                              icon: const Icon(Icons.delete_outline, size: 20),
-                              tooltip: 'Eliminar',
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+                              }
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _HeaderControls extends StatelessWidget {
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final TextEditingController searchController;
+  final void Function(String) onSearchChanged;
+
+  final int statusFilter;
+  final void Function(int) onStatusChanged;
+
+  const _HeaderControls({
+    required this.searchController,
+    required this.onSearchChanged,
+    required this.statusFilter,
+    required this.onStatusChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final compact = c.maxWidth < 720;
+
+          final search = Expanded(
+            child: TextField(
+              controller: searchController,
+              onChanged: onSearchChanged,
+              decoration: InputDecoration(
+                hintText: 'Buscar personal por nombre...',
+                hintStyle: const TextStyle(color: _textGrey),
+                prefixIcon: const Icon(Icons.search, size: 20, color: _textGrey),
+                filled: true,
+                fillColor: const Color(0xFFF9FAFB),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(999)),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  borderSide: const BorderSide(color: _border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  borderSide: const BorderSide(color: _blue, width: 2),
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              ),
+            ),
+          );
+
+          final filters = Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _Pill(
+                label: 'Todos',
+                selected: statusFilter == 0,
+                onTap: () => onStatusChanged(0),
+              ),
+              _Pill(
+                label: 'Activos',
+                selected: statusFilter == 1,
+                onTap: () => onStatusChanged(1),
+              ),
+              _Pill(
+                label: 'De baja',
+                selected: statusFilter == 2,
+                onTap: () => onStatusChanged(2),
+              ),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Administra tu equipo de trabajo',
+                  style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 10),
+                search,
+                const SizedBox(height: 12),
+                filters,
+              ],
+            );
+          }
+
+          return Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Text(
+                      'Administra tu equipo de trabajo',
+                      style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(height: 8),
+                  ],
                 ),
               ),
+              search,
+              const SizedBox(width: 12),
+              filters,
             ],
           );
         },
@@ -500,8 +322,297 @@ class _AdminWorkersScreenState extends State<AdminWorkersScreen> {
   }
 }
 
+class _Pill extends StatelessWidget {
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _Pill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? _blue : Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: selected ? Colors.transparent : _border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : _textDark,
+            fontWeight: FontWeight.w800,
+            fontSize: 12,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkerCard extends StatelessWidget {
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final Trabajador trabajador;
+  final VoidCallback onTap;
+  final VoidCallback onEdit;
+  final Future<void> Function() onDelete;
+
+  const _WorkerCard({
+    required this.trabajador,
+    required this.onTap,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = _initials(trabajador.nombre, trabajador.apellidos);
+
+    final puesto = (trabajador.puesto.isNotEmpty) ? trabajador.puesto : '-';
+    final email = (trabajador.correo.isNotEmpty) ? trabajador.correo : '-';
+    final phone = (trabajador.telefono.isNotEmpty) ? trabajador.telefono : '-';
+    final city = (trabajador.ciudad.isNotEmpty) ? trabajador.ciudad : '-';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(22),
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: _border),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x14000000),
+              blurRadius: 24,
+              offset: Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top: avatar + nombre/puesto + menu
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 22,
+                    backgroundColor: const Color(0xFFEFF6FF),
+                    child: Text(
+                      initials,
+                      style: const TextStyle(
+                        color: _blue,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          trabajador.nombreCompleto,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w900,
+                            color: _textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          puesto,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _textGrey,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Menú 3 puntos: Editar / Eliminar (misma funcionalidad)
+                  PopupMenuButton<String>(
+                    tooltip: 'Opciones',
+                    onSelected: (v) async {
+                      if (v == 'edit') onEdit();
+                      if (v == 'delete') await onDelete();
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Editar')),
+                      PopupMenuItem(value: 'delete', child: Text('Eliminar')),
+                    ],
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.more_vert, color: _textGrey),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // Chip estado
+              Row(
+                children: [
+                  _ActivoChip(activo: trabajador.activo),
+                  const Spacer(),
+                  if (trabajador.tieneVehiculo)
+                    _IconTag(
+                      icon: Icons.directions_car,
+                      label: 'Vehículo',
+                      color: const Color(0xFF15803D),
+                      bg: const Color(0xFFDCFCE7),
+                    )
+                  else
+                    _IconTag(
+                      icon: Icons.close,
+                      label: 'Sin vehículo',
+                      color: const Color(0xFF6B7280),
+                      bg: const Color(0xFFF3F4F6),
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 14),
+              const Divider(height: 1, color: _border),
+              const SizedBox(height: 12),
+
+              // Datos (sin horas ni precio)
+              _InfoRow(icon: Icons.email_outlined, text: email),
+              const SizedBox(height: 10),
+              _InfoRow(icon: Icons.phone_outlined, text: phone),
+              const SizedBox(height: 10),
+              _InfoRow(icon: Icons.location_on_outlined, text: city),
+
+              const Spacer(),
+
+              // Footer “ver más” / editar rápido
+              Row(
+                children: [
+                  Text(
+                    'Ver detalles',
+                    style: TextStyle(
+                      color: _blue.withOpacity(0.9),
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Editar',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined, color: _blue),
+                  ),
+                  IconButton(
+                    tooltip: 'Eliminar',
+                    onPressed: () async => await onDelete(),
+                    icon: const Icon(Icons.delete_outline, color: Color(0xFFB91C1C)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  static const Color _textGrey = Color(0xFF6B7280);
+
+  final IconData icon;
+  final String text;
+
+  const _InfoRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: _textGrey),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF374151),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _IconTag extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final Color bg;
+
+  const _IconTag({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ==========================
-// FORMULARIO CREAR / EDITAR
+// FORMULARIO CREAR / EDITAR (NO TOCADO)
 // ==========================
 
 Future<void> _deleteWorker({
@@ -523,21 +634,14 @@ Future<void> _openWorkerForm({
   const empresaId = AppConfig.empresaId;
   final isEditing = trabajador != null;
 
-  final nombreController =
-      TextEditingController(text: trabajador?.nombre ?? '');
-  final apellidosController =
-      TextEditingController(text: trabajador?.apellidos ?? '');
-  final emailController =
-      TextEditingController(text: trabajador?.correo ?? '');
-  final telefonoController =
-      TextEditingController(text: trabajador?.telefono ?? '');
-  final ciudadController =
-      TextEditingController(text: trabajador?.ciudad ?? '');
+  final nombreController = TextEditingController(text: trabajador?.nombre ?? '');
+  final apellidosController = TextEditingController(text: trabajador?.apellidos ?? '');
+  final emailController = TextEditingController(text: trabajador?.correo ?? '');
+  final telefonoController = TextEditingController(text: trabajador?.telefono ?? '');
+  final ciudadController = TextEditingController(text: trabajador?.ciudad ?? '');
   final dniController = TextEditingController(text: trabajador?.dni ?? '');
   final edadController = TextEditingController(
-    text: trabajador != null && trabajador.edad > 0
-        ? trabajador.edad.toString()
-        : '',
+    text: trabajador != null && trabajador.edad > 0 ? trabajador.edad.toString() : '',
   );
   final aniosExpController = TextEditingController(
     text: trabajador != null && trabajador.aniosExperiencia > 0
@@ -545,9 +649,7 @@ Future<void> _openWorkerForm({
         : '',
   );
 
-  String puesto = trabajador?.puesto.isNotEmpty == true
-      ? trabajador!.puesto
-      : 'camarero';
+  String puesto = trabajador?.puesto.isNotEmpty == true ? trabajador!.puesto : 'camarero';
   bool tieneVehiculo = trabajador?.tieneVehiculo ?? false;
   bool activo = trabajador?.activo ?? true;
 
@@ -577,10 +679,7 @@ Future<void> _openWorkerForm({
                     children: [
                       Text(
                         isEditing ? 'Editar trabajador' : 'Nuevo trabajador',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                       ),
                       const Spacer(),
                       IconButton(
@@ -592,18 +691,12 @@ Future<void> _openWorkerForm({
                   const SizedBox(height: 12),
                   TextField(
                     controller: nombreController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nombre',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: apellidosController,
-                    decoration: const InputDecoration(
-                      labelText: 'Apellidos',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Apellidos', border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -617,27 +710,18 @@ Future<void> _openWorkerForm({
                   const SizedBox(height: 12),
                   TextField(
                     controller: telefonoController,
-                    decoration: const InputDecoration(
-                      labelText: 'Teléfono',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Teléfono', border: OutlineInputBorder()),
                     keyboardType: TextInputType.phone,
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: ciudadController,
-                    decoration: const InputDecoration(
-                      labelText: 'Ciudad',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'Ciudad', border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 12),
                   TextField(
                     controller: dniController,
-                    decoration: const InputDecoration(
-                      labelText: 'DNI',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'DNI', border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -645,29 +729,17 @@ Future<void> _openWorkerForm({
                       Expanded(
                         child: DropdownButtonFormField<String>(
                           value: puesto,
-                          decoration: const InputDecoration(
-                            labelText: 'Puesto',
-                            border: OutlineInputBorder(),
-                          ),
+                          decoration: const InputDecoration(labelText: 'Puesto', border: OutlineInputBorder()),
                           items: const [
-                            DropdownMenuItem(
-                                value: 'camarero', child: Text('Camarero')),
-                            DropdownMenuItem(
-                                value: 'cocinero', child: Text('Cocinero')),
-                            DropdownMenuItem(
-                                value: 'logistica', child: Text('Logística')),
-                            DropdownMenuItem(
-                                value: 'limpiador', child: Text('Limpiador')),
-                            DropdownMenuItem(
-                                value: 'metre', child: Text('Metre')),
-                            DropdownMenuItem(
-                                value: 'coordinador',
-                                child: Text('Coordinador')),
+                            DropdownMenuItem(value: 'camarero', child: Text('Camarero')),
+                            DropdownMenuItem(value: 'cocinero', child: Text('Cocinero')),
+                            DropdownMenuItem(value: 'logistica', child: Text('Logística')),
+                            DropdownMenuItem(value: 'limpiador', child: Text('Limpiador')),
+                            DropdownMenuItem(value: 'metre', child: Text('Metre')),
+                            DropdownMenuItem(value: 'coordinador', child: Text('Coordinador')),
                           ],
                           onChanged: (v) {
-                            if (v != null) {
-                              setState(() => puesto = v);
-                            }
+                            if (v != null) setState(() => puesto = v);
                           },
                         ),
                       ),
@@ -675,10 +747,7 @@ Future<void> _openWorkerForm({
                       Expanded(
                         child: TextField(
                           controller: edadController,
-                          decoration: const InputDecoration(
-                            labelText: 'Edad',
-                            border: OutlineInputBorder(),
-                          ),
+                          decoration: const InputDecoration(labelText: 'Edad', border: OutlineInputBorder()),
                           keyboardType: TextInputType.number,
                         ),
                       ),
@@ -698,17 +767,13 @@ Future<void> _openWorkerForm({
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Dispone de vehículo propio'),
                     value: tieneVehiculo,
-                    onChanged: (v) {
-                      setState(() => tieneVehiculo = v);
-                    },
+                    onChanged: (v) => setState(() => tieneVehiculo = v),
                   ),
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Activo en la empresa'),
                     value: activo,
-                    onChanged: (v) {
-                      setState(() => activo = v);
-                    },
+                    onChanged: (v) => setState(() => activo = v),
                   ),
                   const SizedBox(height: 16),
                   SizedBox(
@@ -722,24 +787,17 @@ Future<void> _openWorkerForm({
 
                         if (nombre.isEmpty || apellidos.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text(
-                                'Nombre y apellidos son obligatorios',
-                              ),
-                            ),
+                            const SnackBar(content: Text('Nombre y apellidos son obligatorios')),
                           );
                           return;
                         }
 
                         final telefono = telefonoController.text.trim();
                         final dni = dniController.text.trim();
-                        final edad =
-                            int.tryParse(edadController.text.trim()) ?? 0;
-                        final aniosExp =
-                            int.tryParse(aniosExpController.text.trim()) ?? 0;
+                        final edad = int.tryParse(edadController.text.trim()) ?? 0;
+                        final aniosExp = int.tryParse(aniosExpController.text.trim()) ?? 0;
 
-                        final nombreLower =
-                            '$nombre $apellidos'.toLowerCase();
+                        final nombreLower = '$nombre $apellidos'.toLowerCase();
                         final ciudadLower = ciudad.toLowerCase();
 
                         final data = <String, dynamic>{
@@ -772,45 +830,30 @@ Future<void> _openWorkerForm({
                           if (isEditing) {
                             await ref.doc(trabajador!.id).update(data);
                           } else {
-                            // Alta solo en Firestore (no crea usuario Auth)
                             await ref.add(data);
                           }
 
                           if (context.mounted) {
                             Navigator.of(context).pop();
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  isEditing
-                                      ? 'Trabajador actualizado'
-                                      : 'Trabajador creado',
-                                ),
-                              ),
+                              SnackBar(content: Text(isEditing ? 'Trabajador actualizado' : 'Trabajador creado')),
                             );
                           }
                         } catch (e) {
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Error al guardar el trabajador: $e',
-                                ),
-                              ),
+                              SnackBar(content: Text('Error al guardar el trabajador: $e')),
                             );
                           }
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
+                        backgroundColor: const Color(0xFF2563EB),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: Text(
-                        isEditing ? 'Guardar cambios' : 'Crear trabajador',
-                      ),
+                      child: Text(isEditing ? 'Guardar cambios' : 'Crear trabajador'),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -844,12 +887,12 @@ class _ActivoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = activo ? const Color(0xFFDCFCE7) : const Color(0xFFF3F4F6);
-    final fg = activo ? const Color(0xFF15803D) : const Color(0xFF6B7280);
-    final text = activo ? 'Activo' : 'Inactivo';
+    final bg = activo ? const Color(0xFFDCFCE7) : const Color(0xFFFFEDD5);
+    final fg = activo ? const Color(0xFF15803D) : const Color(0xFF9A3412);
+    final text = activo ? 'Activo' : 'De baja';
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
@@ -857,8 +900,8 @@ class _ActivoChip extends StatelessWidget {
       child: Text(
         text,
         style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w500,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
           color: fg,
         ),
       ),

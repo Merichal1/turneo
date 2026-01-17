@@ -11,6 +11,14 @@ import '../../models/trabajador.dart';
 class AdminHomeScreen extends StatelessWidget {
   const AdminHomeScreen({super.key});
 
+  // 🎨 Turneo style (igual que login)
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _blue = Color(0xFF2563EB);
+
   void _open(BuildContext context, String route) {
     Navigator.of(context).pushNamed(route);
   }
@@ -23,110 +31,219 @@ class AdminHomeScreen extends StatelessWidget {
     final String empresaId = AppConfig.empresaId;
 
     return SafeArea(
-      child: StreamBuilder<List<Evento>>(
-        stream: FirestoreService.instance.listenEventos(empresaId),
-        builder: (context, eventosSnap) {
-          if (!eventosSnap.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      child: Container(
+        color: _bg,
+        child: StreamBuilder<List<Evento>>(
+          stream: FirestoreService.instance.listenEventos(empresaId),
+          builder: (context, eventosSnap) {
+            if (!eventosSnap.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-          final eventos = eventosSnap.data!;
-          final now = DateTime.now();
-          final mStart = _monthStart(now);
-          final mEnd = _monthEnd(now);
+            final eventos = eventosSnap.data!;
+            final now = DateTime.now();
+            final mStart = _monthStart(now);
+            final mEnd = _monthEnd(now);
 
-          final eventosEsteMes = eventos.where((e) {
-            final d = e.fechaInicio;
-            return d.isAfter(mStart.subtract(const Duration(milliseconds: 1))) &&
-                d.isBefore(mEnd) &&
-                e.estado.toLowerCase() != 'cancelado';
-          }).length;
+            final eventosEsteMes = eventos.where((e) {
+              final d = e.fechaInicio;
+              return d.isAfter(mStart.subtract(const Duration(milliseconds: 1))) &&
+                  d.isBefore(mEnd) &&
+                  e.estado.toLowerCase() != 'cancelado';
+            }).length;
 
-          return StreamBuilder<List<Trabajador>>(
-            stream: FirestoreService.instance.listenTrabajadores(empresaId),
-            builder: (context, trabajadoresSnap) {
-              if (!trabajadoresSnap.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
+            return StreamBuilder<List<Trabajador>>(
+              stream: FirestoreService.instance.listenTrabajadores(empresaId),
+              builder: (context, trabajadoresSnap) {
+                if (!trabajadoresSnap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-              final trabajadores = trabajadoresSnap.data!;
-              final trabajadoresActivos = trabajadores.length;
+                final trabajadores = trabajadoresSnap.data!;
+                final trabajadoresActivos = trabajadores.length;
 
-              // "Pendientes de pago" -> usamos notificaciones no leídas (leido == false)
-              final unreadStream = FirebaseFirestore.instance
-                  .collection('empresas')
-                  .doc(empresaId)
-                  .collection('notificaciones')
-                  .where('leido', isEqualTo: false)
-                  .snapshots();
+                final unreadStream = FirebaseFirestore.instance
+                    .collection('empresas')
+                    .doc(empresaId)
+                    .collection('notificaciones')
+                    .where('leido', isEqualTo: false)
+                    .snapshots();
 
-              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: unreadStream,
-                builder: (context, unreadSnap) {
-                  final pendientes = unreadSnap.data?.docs.length ?? 0;
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: unreadStream,
+                  builder: (context, unreadSnap) {
+                    final pendientes = unreadSnap.data?.docs.length ?? 0;
 
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isCompact = constraints.maxWidth < 800;
-                      final padding = EdgeInsets.all(isCompact ? 16.0 : 24.0);
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isCompact = constraints.maxWidth < 800;
+                        final padding = EdgeInsets.all(isCompact ? 16.0 : 24.0);
 
-                      if (isCompact) {
-                        return SingleChildScrollView(
+                        // -----------------------------
+                        // MOBILE / COMPACT
+                        // -----------------------------
+                        if (isCompact) {
+                          return SingleChildScrollView(
+                            padding: padding,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Panel Principal',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                        color: _textDark,
+                                      ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Resumen de actividad y accesos rápidos',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(color: _textGrey),
+                                ),
+                                const SizedBox(height: 18),
+
+                                _SummaryCard(
+                                  title: 'Eventos este mes',
+                                  value: '$eventosEsteMes',
+                                  icon: Icons.calendar_today_outlined,
+                                  expand: false,
+                                ),
+                                const SizedBox(height: 12),
+                                _SummaryCard(
+                                  title: 'Trabajadores activos',
+                                  value: '$trabajadoresActivos',
+                                  icon: Icons.people_outline,
+                                  expand: false,
+                                ),
+                                const SizedBox(height: 12),
+                                _SummaryCard(
+                                  title: 'Pendientes de pago',
+                                  value: '$pendientes',
+                                  icon: Icons.notifications_active_outlined,
+                                  expand: false,
+                                ),
+
+                                const SizedBox(height: 22),
+
+                                Text(
+                                  'Accesos Rápidos',
+                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                        fontWeight: FontWeight.w800,
+                                        color: _textDark,
+                                      ),
+                                ),
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: [
+                                    _QuickActionButton(
+                                      label: 'Crear Evento',
+                                      icon: Icons.add,
+                                      isPrimary: true,
+                                      onTap: () => _open(context, Routes.adminEvents),
+                                    ),
+                                    _QuickActionButton(
+                                      label: 'Enviar Disponibilidad',
+                                      icon: Icons.send_outlined,
+                                      onTap: () => _open(context, Routes.adminNotifications),
+                                    ),
+                                    _QuickActionButton(
+                                      label: 'Ver Calendario',
+                                      icon: Icons.calendar_month_outlined,
+                                      onTap: () => _open(context, Routes.adminEvents),
+                                    ),
+                                    _QuickActionButton(
+                                      label: 'Gestionar Trabajadores',
+                                      icon: Icons.people_alt_outlined,
+                                      onTap: () => _open(context, Routes.adminWorkers),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 22),
+
+                                _UpcomingEventsCard(
+                                  empresaId: empresaId,
+                                  expandChild: false,
+                                  onOpenCalendar: () => _open(context, Routes.adminEvents),
+                                ),
+                                const SizedBox(height: 16),
+                                _RecentNotificationsCard(
+                                  empresaId: empresaId,
+                                  expandChild: false,
+                                  onOpenNotifications: () => _open(context, Routes.adminNotifications),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                            ),
+                          );
+                        }
+
+                        // -----------------------------
+                        // WEB / DESKTOP
+                        // -----------------------------
+                        return Padding(
                           padding: padding,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'Panel Principal',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.bold),
+                                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                      fontWeight: FontWeight.w900,
+                                      color: _textDark,
+                                    ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 6),
                               Text(
                                 'Resumen de actividad y accesos rápidos',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(color: const Color(0xFF6B7280)),
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: _textGrey),
                               ),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 20),
 
-                              _SummaryCard(
-                                title: 'Eventos este mes',
-                                value: '$eventosEsteMes',
-                                icon: Icons.calendar_today_outlined,
-                                expand: false,
-                              ),
-                              const SizedBox(height: 12),
-                              _SummaryCard(
-                                title: 'Trabajadores activos',
-                                value: '$trabajadoresActivos',
-                                icon: Icons.people_outline,
-                                expand: false,
-                              ),
-                              const SizedBox(height: 12),
-                              _SummaryCard(
-                                title: 'Pendientes de pago',
-                                value: '$pendientes',
-                                icon: Icons.notifications_active_outlined,
-                                expand: false,
+                              Row(
+                                children: [
+                                  _SummaryCard(
+                                    title: 'Eventos este mes',
+                                    value: '$eventosEsteMes',
+                                    icon: Icons.calendar_today_outlined,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  _SummaryCard(
+                                    title: 'Trabajadores activos',
+                                    value: '$trabajadoresActivos',
+                                    icon: Icons.people_outline,
+                                  ),
+                                  const SizedBox(width: 16),
+                                  _SummaryCard(
+                                    title: 'Pendientes de pago',
+                                    value: '$pendientes',
+                                    icon: Icons.notifications_active_outlined,
+                                  ),
+                                ],
                               ),
 
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 22),
 
                               Text(
                                 'Accesos Rápidos',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      color: _textDark,
+                                    ),
                               ),
                               const SizedBox(height: 12),
                               Wrap(
-                                spacing: 12,
-                                runSpacing: 12,
+                                spacing: 10,
+                                runSpacing: 10,
                                 children: [
                                   _QuickActionButton(
                                     label: 'Crear Evento',
@@ -152,146 +269,43 @@ class AdminHomeScreen extends StatelessWidget {
                                 ],
                               ),
 
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 22),
 
-                              _UpcomingEventsCard(
-                                empresaId: empresaId,
-                                expandChild: false,
-                                onOpenCalendar: () => _open(context, Routes.adminEvents),
-                              ),
-                              const SizedBox(height: 16),
-                              _RecentNotificationsCard(
-                                empresaId: empresaId,
-                                expandChild: false,
-                                onOpenNotifications: () =>
-                                    _open(context, Routes.adminNotifications),
+                              Expanded(
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      flex: 2,
+                                      child: _UpcomingEventsCard(
+                                        empresaId: empresaId,
+                                        expandChild: true,
+                                        onOpenCalendar: () => _open(context, Routes.adminEvents),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      flex: 2,
+                                      child: _RecentNotificationsCard(
+                                        empresaId: empresaId,
+                                        expandChild: true,
+                                        onOpenNotifications: () => _open(context, Routes.adminNotifications),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                         );
-                      }
-
-                      // Web / escritorio
-                      return Padding(
-                        padding: padding,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Panel Principal',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Resumen de actividad y accesos rápidos',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
-                                  ?.copyWith(color: const Color(0xFF6B7280)),
-                            ),
-                            const SizedBox(height: 24),
-
-                            Row(
-                              children: [
-                                _SummaryCard(
-                                  title: 'Eventos este mes',
-                                  value: '$eventosEsteMes',
-                                  icon: Icons.calendar_today_outlined,
-                                ),
-                                const SizedBox(width: 16),
-                                _SummaryCard(
-                                  title: 'Trabajadores activos',
-                                  value: '$trabajadoresActivos',
-                                  icon: Icons.people_outline,
-                                ),
-                                const SizedBox(width: 16),
-                                _SummaryCard(
-                                  title: 'Pendientes de pago',
-                                  value: '$pendientes',
-                                  icon: Icons.notifications_active_outlined,
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 24),
-
-                            Text(
-                              'Accesos Rápidos',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              children: [
-                                _QuickActionButton(
-                                  label: 'Crear Evento',
-                                  icon: Icons.add,
-                                  isPrimary: true,
-                                  onTap: () => _open(context, Routes.adminEvents),
-                                ),
-                                _QuickActionButton(
-                                  label: 'Enviar Disponibilidad',
-                                  icon: Icons.send_outlined,
-                                  onTap: () => _open(context, Routes.adminNotifications),
-                                ),
-                                _QuickActionButton(
-                                  label: 'Ver Calendario',
-                                  icon: Icons.calendar_month_outlined,
-                                  onTap: () => _open(context, Routes.adminEvents),
-                                ),
-                                _QuickActionButton(
-                                  label: 'Gestionar Trabajadores',
-                                  icon: Icons.people_alt_outlined,
-                                  onTap: () => _open(context, Routes.adminWorkers),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 24),
-
-                            Expanded(
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    flex: 2,
-                                    child: _UpcomingEventsCard(
-                                      empresaId: empresaId,
-                                      expandChild: true,
-                                      onOpenCalendar: () =>
-                                          _open(context, Routes.adminEvents),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(
-                                    flex: 2,
-                                    child: _RecentNotificationsCard(
-                                      empresaId: empresaId,
-                                      expandChild: true,
-                                      onOpenNotifications: () =>
-                                          _open(context, Routes.adminNotifications),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              );
-            },
-          );
-        },
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -310,34 +324,43 @@ class _SummaryCard extends StatelessWidget {
     this.expand = true,
   });
 
+  static const Color _card = Colors.white;
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _blue = Color(0xFF2563EB);
+
   @override
   Widget build(BuildContext context) {
     final card = Container(
-      height: 90,
+      height: 96,
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+        color: _card,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _border),
+        boxShadow: const [
           BoxShadow(
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-            color: Colors.black.withOpacity(0.04),
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
           ),
         ],
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: const Color(0xFFE5E7EB),
+              borderRadius: BorderRadius.circular(14),
+              color: const Color(0xFFEFF6FF),
+              border: Border.all(color: const Color(0xFFD6E6FF)),
             ),
-            child: Icon(icon, size: 22),
+            child: Icon(icon, size: 22, color: _blue),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -345,18 +368,18 @@ class _SummaryCard extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: const Color(0xFF6B7280)),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: _textGrey,
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   value,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: _textDark,
+                      ),
                 ),
               ],
             ),
@@ -383,21 +406,34 @@ class _QuickActionButton extends StatelessWidget {
     this.isPrimary = false,
   });
 
+  static const Color _blue = Color(0xFF2563EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _border = Color(0xFFE5E7EB);
+
   @override
   Widget build(BuildContext context) {
-    final bg = isPrimary ? const Color(0xFF111827) : Colors.white;
-    final fg = isPrimary ? Colors.white : const Color(0xFF111827);
-    final border = isPrimary ? Colors.transparent : const Color(0xFFE5E7EB);
+    final bg = isPrimary ? _blue : Colors.white;
+    final fg = isPrimary ? Colors.white : _textDark;
+    final border = isPrimary ? Colors.transparent : _border;
 
     return InkWell(
       borderRadius: BorderRadius.circular(999),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(999),
           border: Border.all(color: border),
+          boxShadow: isPrimary
+              ? const [
+                  BoxShadow(
+                    color: Color(0x1A2563EB),
+                    blurRadius: 16,
+                    offset: Offset(0, 10),
+                  )
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -406,7 +442,10 @@ class _QuickActionButton extends StatelessWidget {
             const SizedBox(width: 8),
             Text(
               label,
-              style: TextStyle(color: fg, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: fg,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
         ),
@@ -426,6 +465,8 @@ class _UpcomingEventsCard extends StatelessWidget {
   final bool expandChild;
   final VoidCallback? onOpenCalendar;
 
+  static const Color _blue = Color(0xFF2563EB);
+
   String _statusLabel(String raw) {
     final s = raw.toLowerCase().trim();
     if (s == 'activo') return 'Confirmado';
@@ -444,6 +485,7 @@ class _UpcomingEventsCard extends StatelessWidget {
           ? null
           : TextButton(
               onPressed: onOpenCalendar,
+              style: TextButton.styleFrom(foregroundColor: _blue),
               child: const Text("Ver calendario"),
             ),
       child: StreamBuilder<List<Evento>>(
@@ -475,7 +517,7 @@ class _UpcomingEventsCard extends StatelessWidget {
           if (expandChild) {
             return ListView.separated(
               itemCount: shown.length,
-              separatorBuilder: (_, __) => const Divider(height: 14),
+              separatorBuilder: (_, __) => const Divider(height: 16),
               itemBuilder: (context, i) {
                 final e = shown[i];
                 final total = e.cantidadRequeridaTrabajadores;
@@ -519,6 +561,8 @@ class _RecentNotificationsCard extends StatelessWidget {
   final bool expandChild;
   final VoidCallback? onOpenNotifications;
 
+  static const Color _blue = Color(0xFF2563EB);
+
   String _timeAgo(DateTime d) {
     final diff = DateTime.now().difference(d);
     if (diff.inSeconds < 30) return "Hace un momento";
@@ -547,6 +591,7 @@ class _RecentNotificationsCard extends StatelessWidget {
           ? null
           : TextButton(
               onPressed: onOpenNotifications,
+              style: TextButton.styleFrom(foregroundColor: _blue),
               child: const Text("Ver todas"),
             ),
       child: StreamBuilder<List<Map<String, dynamic>>>(
@@ -578,7 +623,7 @@ class _RecentNotificationsCard extends StatelessWidget {
           if (expandChild) {
             return ListView.separated(
               itemCount: shown.length,
-              separatorBuilder: (_, __) => const Divider(height: 14),
+              separatorBuilder: (_, __) => const Divider(height: 16),
               itemBuilder: (context, i) {
                 final n = shown[i];
                 final titulo = (n['titulo'] ?? 'Notificación').toString();
@@ -621,18 +666,23 @@ class _CardWrapper extends StatelessWidget {
     this.headerAction,
   });
 
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+        color: _card,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+        boxShadow: const [
           BoxShadow(
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-            color: Colors.black.withOpacity(0.04),
+            color: Color(0x14000000),
+            blurRadius: 24,
+            offset: Offset(0, 10),
           ),
         ],
       ),
@@ -644,10 +694,10 @@ class _CardWrapper extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: _textDark,
+                      ),
                 ),
               ),
               if (headerAction != null) headerAction!,
@@ -674,42 +724,73 @@ class _EventRow extends StatelessWidget {
     required this.status,
   });
 
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _border = Color(0xFFE5E7EB);
+
   Color _statusBg(String status) {
     final s = status.toLowerCase();
-    if (s.contains('pend')) return const Color(0xFFFFF7ED);
+    if (s.contains('pend')) return const Color(0xFFEFF6FF);
     if (s.contains('final')) return const Color(0xFFECFDF5);
     if (s.contains('cancel')) return const Color(0xFFFEF2F2);
-    return const Color(0xFFE5E7EB);
+    return const Color(0xFFF3F4F6);
+  }
+
+  Color _statusFg(String status) {
+    final s = status.toLowerCase();
+    if (s.contains('pend')) return const Color(0xFF2563EB);
+    if (s.contains('final')) return const Color(0xFF047857);
+    if (s.contains('cancel')) return const Color(0xFFB91C1C);
+    return const Color(0xFF374151);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: _border.withOpacity(0.7), width: 1),
+        ),
+      ),
       child: Row(
         children: [
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-                const SizedBox(height: 2),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: _textDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
                 Text(
                   '$date   •   $workers',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: _textGrey,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: _statusBg(status),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
               status,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: _statusFg(status),
+              ),
             ),
           ),
         ],
@@ -729,15 +810,18 @@ class _NotificationRow extends StatelessWidget {
     required this.dotColor,
   });
 
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _textDark = Color(0xFF111827);
+
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            margin: const EdgeInsets.only(top: 4),
+            margin: const EdgeInsets.only(top: 6),
             width: 8,
             height: 8,
             decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
@@ -747,11 +831,21 @@ class _NotificationRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
-                const SizedBox(height: 2),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: _textDark,
+                  ),
+                ),
+                const SizedBox(height: 3),
                 Text(
                   timeAgo,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: _textGrey,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
