@@ -60,5 +60,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
+	<!-- Permisos para galería/cámara (image_picker) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Necesitamos acceso a tus fotos para elegir una imagen de perfil.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Necesitamos permiso para guardar fotos en tu galería si lo deseas.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Necesitamos acceso a la cámara para hacer una foto de perfil.</string>
 </dict>
 </plist>

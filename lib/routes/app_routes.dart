@@ -74,7 +74,6 @@ class Routes {
     adminEvents: (_) => const AdminEventsScreen(),
     adminWorkers: (_) => const AdminWorkersScreen(),
     adminChat: (_) => const AdminChatScreen(),
-    adminDatabase: (_) => const AdminDatabaseScreen(),
     adminImport: (_) => const AdminImportScreen(),
     adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),
     adminNotifications: (_) => const AdminNotificacionesScreen(),

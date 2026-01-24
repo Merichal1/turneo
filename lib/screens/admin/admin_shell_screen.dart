@@ -20,28 +20,28 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // ✅ Mantiene estado de cada pantalla (shell fijo, sin reconstrucciones raras)
+  // ✅ Mantiene estado de cada pantalla (shell fijo)
+  // ❗ NO lo marques const. Evita problemas con pantallas no-const o cambios en hot reload.
   late final List<Widget> _pages = [
-    const AdminHomeScreen(), // 0 – Dashboard
-    const AdminEventsScreen(), // 1 – Eventos
-    const AdminWorkersScreen(), // 2 – Trabajadores
-    const AdminNotificacionesScreen(), // 3 – Notificaciones
-    const AdminChatScreen(), // 4 – Chat
-    const AdminPaymentsHistoryScreen(), // 5 – Gestión
-    const AdminDatabaseScreen(), // 6 – Empresas
+    const AdminHomeScreen(),               // 0 – Dashboard
+    const AdminEventsScreen(),             // 1 – Eventos
+    const AdminWorkersScreen(),            // 2 – Trabajadores
+    const AdminNotificacionesScreen(),     // 3 – Notificaciones
+    const AdminChatScreen(),               // 4 – Chat
+    const AdminPaymentsHistoryScreen(),    // 5 – Gestión
   ];
 
-  // 🎨 Estilo Turneo (igual que login)
+  // 🎨 Estilo Turneo (login)
   static const Color _bg = Color(0xFFF6F8FC);
-  static const Color _card = Colors.white;
   static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
   static const Color _border = Color(0xFFE5E7EB);
   static const Color _blue = Color(0xFF2563EB);
 
+  bool _redirecting = false;
+
   @override
   Widget build(BuildContext context) {
-    // ✅ No uses currentUser directamente: al cerrar sesión queremos reaccionar bien
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snap) {
@@ -52,16 +52,23 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
         }
 
         final user = snap.data;
+
+        // ✅ Si no hay usuario, redirige una sola vez
         if (user == null) {
-          // ✅ IMPORTANTÍSIMO: manda a WELCOME o LOGIN y corta backstack
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
-            // Si tu ruta es /login en vez de /welcome:
-            // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
-          });
+          if (!_redirecting) {
+            _redirecting = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
+              // Si tu ruta es /login:
+              // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+            });
+          }
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+
+        // ✅ Reset del flag si vuelve a haber user
+        _redirecting = false;
 
         return LayoutBuilder(
           builder: (context, constraints) {
@@ -85,15 +92,15 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
       body: Row(
         children: [
           _buildSideMenu(context, user),
-        Expanded(
-          child: Container(
-            color: const Color(0xFFF5F6FA),
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: _pages,
+          Expanded(
+            child: Container(
+              color: _bg,
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: _pages,
+              ),
             ),
           ),
-        ),
         ],
       ),
     );
@@ -109,27 +116,11 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
       drawer: Drawer(
         child: _buildDrawerMenu(context, user),
       ),
-      appBar: AppBar(
-        backgroundColor: _bg,
-        elevation: 0,
-        centerTitle: false,
-        titleSpacing: 12,
-        title: Text(
-          _titleForIndex(_selectedIndex),
-          style: const TextStyle(
-            color: _textDark,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        iconTheme: const IconThemeData(color: _textDark),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(14),
-        child: _BodyCard(
-          child: IndexedStack(
-            index: _selectedIndex,
-            children: _pages,
-          ),
+      // ✅ Sin AppBar aquí para que NO “salte” ni duplique con las pantallas internas
+      body: SafeArea(
+        child: IndexedStack(
+          index: _selectedIndex,
+          children: _pages,
         ),
       ),
       bottomNavigationBar: isCompact
@@ -170,25 +161,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     return 3;
   }
 
-  String _titleForIndex(int index) {
-    switch (index) {
-      case 0:
-        return 'Dashboard';
-      case 1:
-        return 'Eventos';
-      case 2:
-        return 'Trabajadores';
-      case 3:
-        return 'Notificaciones';
-      case 4:
-        return 'Chat';
-      case 5:
-        return 'Gestión';
-      default:
-        return 'Turneo';
-    }
-  }
-
   // ---------------------------
   // Drawer menu
   // ---------------------------
@@ -202,8 +174,8 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           children: [
             const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 14),
               child: _TurneoBrandHeader(),
             ),
             const SizedBox(height: 12),
@@ -225,20 +197,11 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                 backgroundColor: Color(0xFFEFF6FF),
                 child: Text(
                   'AD',
-                  style: TextStyle(
-                    color: _blue,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(color: _blue, fontWeight: FontWeight.w800),
                 ),
               ),
-              title: const Text(
-                'Administrador',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text(
-                email.isEmpty ? '—' : email,
-                style: const TextStyle(color: _textGrey),
-              ),
+              title: const Text('Administrador', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(email.isEmpty ? '—' : email, style: const TextStyle(color: _textGrey)),
             ),
 
             Padding(
@@ -253,11 +216,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                 ),
                 onPressed: () async {
                   Navigator.of(context).pop(); // cierra drawer
-                  await FirebaseAuth.instance.signOut();
-                  if (!mounted) return;
-                  Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
-                  // Si tu ruta es /login:
-                  // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+                  await FirebaseAuth.instance.signOut(); // el StreamBuilder redirige
                 },
               ),
             ),
@@ -289,7 +248,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
           ),
         ),
         selected: isSelected,
-        selectedTileColor: const Color(0xFFEFF6FF), // azul claro
+        selectedTileColor: const Color(0xFFEFF6FF),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         onTap: () {
           Navigator.of(context).pop();
@@ -362,22 +321,10 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
               leading: const CircleAvatar(
                 radius: 18,
                 backgroundColor: Color(0xFFEFF6FF),
-                child: Text(
-                  'AD',
-                  style: TextStyle(
-                    color: _blue,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
+                child: Text('AD', style: TextStyle(color: _blue, fontWeight: FontWeight.w800)),
               ),
-              title: const Text(
-                'Administrador',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: Text(
-                email.isEmpty ? '—' : email,
-                style: const TextStyle(color: _textGrey),
-              ),
+              title: const Text('Administrador', style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(email.isEmpty ? '—' : email, style: const TextStyle(color: _textGrey)),
             ),
 
             Padding(
@@ -393,11 +340,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                    if (!mounted) return;
-                    Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
-                    // Si tu ruta es /login:
-                    // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
+                    await FirebaseAuth.instance.signOut(); // el StreamBuilder redirige
                   },
                 ),
               ),
@@ -410,7 +353,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   }
 
   void _onItemTap(int index) {
-    if (_selectedIndex == index) return; // ✅ evita rebuild extra
+    if (_selectedIndex == index) return;
     setState(() => _selectedIndex = index);
   }
 }
@@ -448,32 +391,6 @@ class _TurneoBrandHeader extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _BodyCard extends StatelessWidget {
-  final Widget child;
-  const _BodyCard({required this.child});
-
-  static const Color _card = Colors.white;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: child,
     );
   }
 }
@@ -526,21 +443,6 @@ class _SideMenuItem extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// Placeholder para Empresas
-class AdminDatabaseScreen extends StatelessWidget {
-  const AdminDatabaseScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'Pantalla de Empresas / Base de datos (pendiente de implementar)',
-        style: TextStyle(fontSize: 18),
       ),
     );
   }

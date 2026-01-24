@@ -1,11 +1,31 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../config/app_config.dart';
 
-class WorkerProfileScreen extends StatelessWidget {
+class WorkerProfileScreen extends StatefulWidget {
   const WorkerProfileScreen({super.key});
+
+  @override
+  State<WorkerProfileScreen> createState() => _WorkerProfileScreenState();
+}
+
+class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
+  // ====== THEME (Turneo / Admin) ======
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
+  final _picker = ImagePicker();
+  bool _uploadingPhoto = false;
 
   DocumentReference<Map<String, dynamic>> _workerRef(String uid) {
     return FirebaseFirestore.instance
@@ -13,6 +33,16 @@ class WorkerProfileScreen extends StatelessWidget {
         .doc(AppConfig.empresaId)
         .collection('trabajadores')
         .doc(uid);
+  }
+
+  Reference _workerPhotoRef(String uid) {
+    return FirebaseStorage.instance
+        .ref()
+        .child('empresas')
+        .child(AppConfig.empresaId)
+        .child('trabajadores')
+        .child(uid)
+        .child('profile.jpg');
   }
 
   String _initialsFromName(String fullName, String email) {
@@ -34,12 +64,16 @@ class WorkerProfileScreen extends StatelessWidget {
 
   String _rolesToText(dynamic roles, dynamic rolFallback) {
     if (roles is List) {
-      final cleaned =
-          roles.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      final cleaned = roles
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
       return cleaned.isEmpty ? '—' : cleaned.join(' / ');
     }
     if (roles is String && roles.trim().isNotEmpty) return roles.trim();
-    if (rolFallback is String && rolFallback.trim().isNotEmpty) return rolFallback.trim();
+    if (rolFallback is String && rolFallback.trim().isNotEmpty) {
+      return rolFallback.trim();
+    }
     return '—';
   }
 
@@ -59,6 +93,110 @@ class WorkerProfileScreen extends StatelessWidget {
     return null;
   }
 
+  Future<void> _changePhoto({
+    required BuildContext context,
+    required String uid,
+    required DocumentReference<Map<String, dynamic>> ref,
+  }) async {
+    // 1) Preguntar al usuario si cámara o galería
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 4,
+                width: 48,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE5E7EB),
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Foto de perfil',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: _textDark,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Elegir de la galería'),
+                onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Hacer una foto'),
+                onTap: () => Navigator.pop(ctx, ImageSource.camera),
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (source == null) return;
+
+    try {
+      setState(() => _uploadingPhoto = true);
+
+      // 2) Elegir/capturar imagen
+      final XFile? picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 82,
+        maxWidth: 1024,
+      );
+
+      if (picked == null) {
+        setState(() => _uploadingPhoto = false);
+        return;
+      }
+
+      // 3) Subir a Storage
+      final Uint8List bytes = await picked.readAsBytes();
+      final photoRef = _workerPhotoRef(uid);
+
+      await photoRef.putData(
+        bytes,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+
+      final url = await photoRef.getDownloadURL();
+
+      // 4) Guardar url en Firestore (campo: photoUrl)
+      await ref.set(
+        {
+          'photoUrl': url,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Foto actualizada ✅')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error subiendo foto: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -66,7 +204,7 @@ class WorkerProfileScreen extends StatelessWidget {
     if (user == null) {
       return const SafeArea(
         child: Scaffold(
-          backgroundColor: Color(0xFFF3F4F6),
+          backgroundColor: _bg,
           body: Center(child: Text('Inicia sesión')),
         ),
       );
@@ -76,7 +214,7 @@ class WorkerProfileScreen extends StatelessWidget {
 
     return SafeArea(
       child: Scaffold(
-        backgroundColor: const Color(0xFFF3F4F6),
+        backgroundColor: _bg,
         body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream: ref.snapshots(),
           builder: (context, snap) {
@@ -88,101 +226,169 @@ class WorkerProfileScreen extends StatelessWidget {
 
             final nombre = _safeText(data['nombre']);
             final apellidos = _safeText(data['apellidos']);
-            final fullName = (('$nombre $apellidos').trim().replaceAll(RegExp(r'\s+'), ' '));
+            final fullName =
+                (('$nombre $apellidos').trim().replaceAll(RegExp(r'\s+'), ' '));
             final displayName =
                 (fullName.trim().isEmpty || fullName == '— —') ? '—' : fullName;
 
             final rolesText = _rolesToText(data['roles'], data['rol']);
             final empresaNombre = _safeText(data['empresaNombre']);
 
-            final email = (user.email ?? '').trim().isEmpty ? '—' : user.email!.trim();
+            final email =
+                (user.email ?? '').trim().isEmpty ? '—' : user.email!.trim();
             final telefono = _safeText(data['telefono']);
             final dni = _safeText(data['dni']);
             final nacimiento = _formatBirth(data['fechaNacimiento']);
 
-            final bool notificacionesPush =
-                (data['notificacionesPush'] is bool) ? data['notificacionesPush'] as bool : true;
+            final bool notificacionesPush = (data['notificacionesPush'] is bool)
+                ? data['notificacionesPush'] as bool
+                : true;
 
-            final initials = _initialsFromName(displayName == '—' ? '' : displayName, user.email ?? '');
+            final photoUrl = (data['photoUrl'] ?? '').toString().trim();
+            final initials = _initialsFromName(
+              displayName == '—' ? '' : displayName,
+              user.email ?? '',
+            );
 
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // CABECERA
-                  Row(
-                    children: const [
-                      Icon(Icons.person_outline, size: 24),
-                      SizedBox(width: 8),
-                      Text(
-                        'Mi perfil',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                  // ===== Header =====
+                  const Text(
+                    'Perfil',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: _textDark,
+                    ),
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Tu información personal y ajustes',
+                    style: TextStyle(
+                      color: _textGrey,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
 
-                  // TARJETA PRINCIPAL PERFIL
+                  // ===== Card principal =====
                   Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: _card,
                       borderRadius: BorderRadius.circular(18),
-                      boxShadow: [
+                      border: Border.all(color: _border),
+                      boxShadow: const [
                         BoxShadow(
-                          blurRadius: 18,
-                          offset: const Offset(0, 8),
-                          color: Colors.black.withOpacity(0.04),
+                          color: Color(0x14000000),
+                          blurRadius: 24,
+                          offset: Offset(0, 10),
                         ),
                       ],
                     ),
                     child: Row(
                       children: [
-                        CircleAvatar(
-                          radius: 30,
-                          child: Text(
-                            initials,
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
+                        Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 26,
+                              backgroundColor: const Color(0xFFEFF6FF),
+                              backgroundImage:
+                                  photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                              child: photoUrl.isNotEmpty
+                                  ? null
+                                  : Text(
+                                      initials,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w900,
+                                        color: _textDark,
+                                      ),
+                                    ),
                             ),
-                          ),
+                            Positioned(
+                              right: -2,
+                              bottom: -2,
+                              child: InkWell(
+                                onTap: _uploadingPhoto
+                                    ? null
+                                    : () => _changePhoto(
+                                          context: context,
+                                          uid: user.uid,
+                                          ref: ref,
+                                        ),
+                                child: Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: _blue,
+                                    borderRadius: BorderRadius.circular(99),
+                                    border: Border.all(color: Colors.white, width: 2),
+                                  ),
+                                  child: _uploadingPhoto
+                                      ? const SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.camera_alt_outlined,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 16),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  color: _textDark,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 rolesText,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF6B7280),
+                                  fontSize: 12,
+                                  color: _textGrey,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                empresaNombre == '—' ? 'Mi empresa' : empresaNombre,
+                                empresaNombre == '—'
+                                    ? 'Mi empresa'
+                                    : empresaNombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Color(0xFF6B7280),
+                                  fontSize: 12,
+                                  color: _textGrey,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ],
                           ),
                         ),
+                        const SizedBox(width: 8),
                         IconButton(
                           onPressed: () => _openEditSheet(
                             context: context,
@@ -190,21 +396,23 @@ class WorkerProfileScreen extends StatelessWidget {
                             existing: data,
                             email: email,
                           ),
-                          icon: const Icon(Icons.edit_outlined),
+                          icon: const Icon(Icons.edit_outlined, color: _blue),
+                          tooltip: 'Editar',
                         ),
                       ],
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 14),
 
-                  // DATOS PERSONALES
+                  // ===== Datos personales =====
                   _SectionCard(
                     title: 'Datos personales',
+                    icon: Icons.badge_outlined,
                     children: [
                       _ProfileRow(
                         icon: Icons.email_outlined,
-                        label: 'Correo electrónico',
+                        label: 'Correo',
                         value: email,
                       ),
                       _ProfileRow(
@@ -213,127 +421,129 @@ class WorkerProfileScreen extends StatelessWidget {
                         value: telefono,
                       ),
                       _ProfileRow(
-                        icon: Icons.badge_outlined,
+                        icon: Icons.credit_card_outlined,
                         label: 'DNI / NIE',
                         value: dni,
                       ),
                       _ProfileRow(
                         icon: Icons.cake_outlined,
-                        label: 'Fecha de nacimiento',
+                        label: 'Nacimiento',
                         value: nacimiento,
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                  // DATOS LABORALES (✅ QUITADO "Último pago")
+                  // ===== Datos laborales =====
                   _SectionCard(
                     title: 'Datos laborales',
+                    icon: Icons.work_outline,
                     children: [
                       _ProfileRow(
                         icon: Icons.work_outline,
                         label: 'Rol principal',
-                        value: rolesText == '—' ? '—' : rolesText.split(' / ').first,
+                        value: rolesText == '—'
+                            ? '—'
+                            : rolesText.split(' / ').first,
                       ),
                       _ProfileRow(
-                        icon: Icons.work_history_outlined,
-                        label: 'Experiencia en la plataforma',
-                        value: '—',
-                      ),
-                      _ProfileRow(
-                        icon: Icons.fact_check_outlined,
-                        label: 'Eventos completados',
-                        value: '—',
+                        icon: Icons.layers_outlined,
+                        label: 'Roles',
+                        value: rolesText,
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                  // SEGURIDAD
+                  // ===== Seguridad =====
                   _SectionCard(
                     title: 'Seguridad',
+                    icon: Icons.lock_outline,
                     children: [
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.lock_outline),
-                        title: const Text(
-                          'Cambiar contraseña',
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        subtitle: const Text(
-                          'Actualiza tu contraseña de acceso',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
+                      _ActionTile(
+                        icon: Icons.lock_reset_outlined,
+                        title: 'Cambiar contraseña',
+                        subtitle: 'Te enviamos un email para restablecerla',
                         onTap: () async {
                           final mail = user.email;
                           if (mail == null || mail.trim().isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Tu usuario no tiene email.')),
+                              const SnackBar(
+                                content: Text('Tu usuario no tiene email.'),
+                              ),
                             );
                             return;
                           }
-                          await FirebaseAuth.instance.sendPasswordResetEmail(email: mail.trim());
+                          await FirebaseAuth.instance
+                              .sendPasswordResetEmail(email: mail.trim());
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Te envié un email para cambiar la contraseña.')),
+                              const SnackBar(
+                                content: Text(
+                                    'Te envié un email para cambiar la contraseña.'),
+                              ),
                             );
                           }
                         },
                       ),
-                      const SizedBox(height: 8),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.devices_other_outlined),
-                        title: const Text(
-                          'Dispositivos activos',
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        subtitle: const Text(
-                          'Cierra sesión en otros dispositivos',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
+                      const SizedBox(height: 10),
+                      _ActionTile(
+                        icon: Icons.devices_other_outlined,
+                        title: 'Dispositivos activos',
+                        subtitle: 'Gestión de sesiones (pendiente)',
                         onTap: () {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Gestión de sesiones (pendiente)')),
+                            const SnackBar(
+                              content: Text('Gestión de sesiones (pendiente)'),
+                            ),
                           );
                         },
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                  // CUENTA
+                  // ===== Cuenta =====
                   _SectionCard(
                     title: 'Cuenta',
+                    icon: Icons.settings_outlined,
                     children: [
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text(
-                          'Notificaciones push',
-                          style: TextStyle(fontSize: 14),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF9FAFB),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: _border),
                         ),
-                        subtitle: const Text(
-                          'Recibir avisos de nuevos eventos y cambios',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF6B7280),
+                        child: SwitchListTile(
+                          contentPadding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          title: const Text(
+                            'Notificaciones push',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: _textDark,
+                              fontSize: 13,
+                            ),
                           ),
+                          subtitle: const Text(
+                            'Recibir avisos de nuevos eventos y cambios',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _textGrey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          value: notificacionesPush,
+                          onChanged: (v) async {
+                            await ref.set(
+                              {'notificacionesPush': v},
+                              SetOptions(merge: true),
+                            );
+                          },
                         ),
-                        value: notificacionesPush,
-                        onChanged: (v) async {
-                          await ref.set({'notificacionesPush': v}, SetOptions(merge: true));
-                        },
                       ),
                       const SizedBox(height: 12),
                       SizedBox(
@@ -345,23 +555,17 @@ class WorkerProfileScreen extends StatelessWidget {
                               Navigator.of(context).popUntil((r) => r.isFirst);
                             }
                           },
-                          icon: const Icon(
-                            Icons.logout,
-                            size: 18,
-                            color: Color(0xFFDC2626),
-                          ),
+                          icon: const Icon(Icons.logout, size: 18),
                           label: const Text(
                             'Cerrar sesión',
-                            style: TextStyle(
-                              color: Color(0xFFDC2626),
-                              fontWeight: FontWeight.w500,
-                            ),
+                            style: TextStyle(fontWeight: FontWeight.w900),
                           ),
                           style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFFDC2626),
                             side: const BorderSide(color: Color(0xFFFCA5A5)),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
                         ),
@@ -383,13 +587,17 @@ class WorkerProfileScreen extends StatelessWidget {
     required Map<String, dynamic> existing,
     required String email,
   }) async {
-    final nombreCtrl = TextEditingController(text: (existing['nombre'] ?? '').toString());
-    final apellidosCtrl = TextEditingController(text: (existing['apellidos'] ?? '').toString());
-    final telefonoCtrl = TextEditingController(text: (existing['telefono'] ?? '').toString());
-    final dniCtrl = TextEditingController(text: (existing['dni'] ?? '').toString());
-    final empresaCtrl = TextEditingController(text: (existing['empresaNombre'] ?? '').toString());
+    final nombreCtrl =
+        TextEditingController(text: (existing['nombre'] ?? '').toString());
+    final apellidosCtrl =
+        TextEditingController(text: (existing['apellidos'] ?? '').toString());
+    final telefonoCtrl =
+        TextEditingController(text: (existing['telefono'] ?? '').toString());
+    final dniCtrl =
+        TextEditingController(text: (existing['dni'] ?? '').toString());
+    final empresaCtrl = TextEditingController(
+        text: (existing['empresaNombre'] ?? '').toString());
 
-    // roles: permitimos editar como texto "camarero, cocinero"
     String rolesText;
     final rolesExisting = existing['roles'];
     if (rolesExisting is List) {
@@ -410,27 +618,30 @@ class WorkerProfileScreen extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setMState) => Padding(
           padding: EdgeInsets.only(
             left: 16,
             right: 16,
-            top: 16,
+            top: 14,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
           ),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // header
                 Row(
                   children: [
                     const Expanded(
                       child: Text(
                         'Editar perfil',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: _textDark,
+                        ),
                       ),
                     ),
                     IconButton(
@@ -439,45 +650,25 @@ class WorkerProfileScreen extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text(email, style: const TextStyle(color: Colors.grey)),
-                const SizedBox(height: 16),
+                const SizedBox(height: 2),
+                Text(email,
+                    style: const TextStyle(
+                        color: _textGrey, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 14),
 
-                TextField(
-                  controller: nombreCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: apellidosCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Apellidos',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
+                _Input(controller: nombreCtrl, label: 'Nombre'),
+                const SizedBox(height: 10),
+                _Input(controller: apellidosCtrl, label: 'Apellidos'),
+                const SizedBox(height: 10),
+                _Input(
                   controller: telefonoCtrl,
+                  label: 'Teléfono',
                   keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Teléfono',
-                    border: OutlineInputBorder(),
-                  ),
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: dniCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'DNI / NIE',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                _Input(controller: dniCtrl, label: 'DNI / NIE'),
+                const SizedBox(height: 10),
 
-                // Fecha nacimiento
                 GestureDetector(
                   onTap: () async {
                     final now = DateTime.now();
@@ -490,51 +681,39 @@ class WorkerProfileScreen extends StatelessWidget {
                     if (picked != null) setMState(() => birth = picked);
                   },
                   child: AbsorbPointer(
-                    child: TextField(
-                      decoration: InputDecoration(
-                        labelText: 'Fecha de nacimiento',
-                        border: const OutlineInputBorder(),
-                        suffixIcon: const Icon(Icons.calendar_today_outlined),
-                        hintText: birth == null
-                            ? 'Selecciona fecha'
-                            : '${birth!.day.toString().padLeft(2, '0')}/${birth!.month.toString().padLeft(2, '0')}/${birth!.year}',
-                      ),
+                    child: _Input(
+                      label: 'Fecha de nacimiento',
+                      hintText: birth == null
+                          ? 'Selecciona fecha'
+                          : '${birth!.day.toString().padLeft(2, '0')}/${birth!.month.toString().padLeft(2, '0')}/${birth!.year}',
+                      suffixIcon: const Icon(Icons.calendar_today_outlined),
                     ),
                   ),
                 ),
 
-                const SizedBox(height: 12),
-                TextField(
+                const SizedBox(height: 10),
+                _Input(
                   controller: rolesCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Roles (separados por coma)',
-                    border: OutlineInputBorder(),
-                    hintText: 'camarero, cocinero',
-                  ),
+                  label: 'Roles (separados por coma)',
+                  hintText: 'camarero, cocinero',
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: empresaCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Empresa',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
+                const SizedBox(height: 10),
+                _Input(controller: empresaCtrl, label: 'Empresa'),
 
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
+                      backgroundColor: _blue,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.all(14),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
                     ),
                     onPressed: () async {
-                      // preparar roles
                       final rolesRaw = rolesCtrl.text
                           .split(',')
                           .map((e) => e.trim())
@@ -548,9 +727,9 @@ class WorkerProfileScreen extends StatelessWidget {
                         'dni': dniCtrl.text.trim(),
                         'empresaNombre': empresaCtrl.text.trim(),
                         'roles': rolesRaw,
-                        // opcional: rol "principal"
                         if (rolesRaw.isNotEmpty) 'rol': rolesRaw.first,
-                        if (birth != null) 'fechaNacimiento': Timestamp.fromDate(birth!),
+                        if (birth != null)
+                          'fechaNacimiento': Timestamp.fromDate(birth!),
                       };
 
                       await ref.set(payload, SetOptions(merge: true));
@@ -562,7 +741,10 @@ class WorkerProfileScreen extends StatelessWidget {
                         );
                       }
                     },
-                    child: const Text('Guardar cambios'),
+                    child: const Text(
+                      'Guardar cambios',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
                   ),
                 ),
               ],
@@ -574,41 +756,57 @@ class WorkerProfileScreen extends StatelessWidget {
   }
 }
 
-// ────────────────────────── WIDGETS AUXILIARES ──────────────────────────
+// ────────────────────────── UI components ──────────────────────────
+// (tus widgets auxiliares igual que los tienes)
 
 class _SectionCard extends StatelessWidget {
   final String title;
+  final IconData icon;
   final List<Widget> children;
 
   const _SectionCard({
     required this.title,
+    required this.icon,
     required this.children,
   });
+
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _card,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+        border: Border.all(color: _border),
+        boxShadow: const [
           BoxShadow(
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-            color: Colors.black.withOpacity(0.04),
+            color: Color(0x12000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              Icon(icon, size: 18, color: _textGrey),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: _textDark,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           ...children,
@@ -629,6 +827,9 @@ class _ProfileRow extends StatelessWidget {
     required this.value,
   });
 
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -636,7 +837,7 @@ class _ProfileRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: const Color(0xFF6B7280)),
+          Icon(icon, size: 18, color: _textGrey),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -646,7 +847,8 @@ class _ProfileRow extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF6B7280),
+                    color: _textGrey,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -654,12 +856,126 @@ class _ProfileRow extends StatelessWidget {
                   value,
                   style: const TextStyle(
                     fontSize: 14,
+                    color: _textDark,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _ActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textGrey = Color(0xFF6B7280);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        leading: Icon(icon, color: _textGrey),
+        title: const SizedBox.shrink(),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF111827),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: _textGrey,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: _textGrey),
+      ),
+    );
+  }
+}
+
+class _Input extends StatelessWidget {
+  final TextEditingController? controller;
+  final String label;
+  final String? hintText;
+  final TextInputType? keyboardType;
+  final Widget? suffixIcon;
+
+  const _Input({
+    this.controller,
+    required this.label,
+    this.hintText,
+    this.keyboardType,
+    this.suffixIcon,
+  });
+
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hintText,
+        labelStyle: const TextStyle(
+          color: _textGrey,
+          fontWeight: FontWeight.w700,
+        ),
+        isDense: true,
+        suffixIcon: suffixIcon,
+        filled: true,
+        fillColor: const Color(0xFFF9FAFB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: _blue, width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       ),
     );
   }

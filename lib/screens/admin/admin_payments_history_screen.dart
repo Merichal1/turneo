@@ -1,6 +1,14 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
+import 'package:intl/intl.dart';
+
+import '../../reports/admin_reports.dart';
 
 class AdminPaymentsHistoryScreen extends StatefulWidget {
   const AdminPaymentsHistoryScreen({super.key});
@@ -19,7 +27,7 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   static const Color _textGrey = Color(0xFF6B7280);
   static const Color _blue = Color(0xFF2563EB);
 
-  final _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   String? _empresaId;
   String? _selectedEventoId;
@@ -28,13 +36,28 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   final TextEditingController _eventSearchCtrl = TextEditingController();
   String _eventSearch = '';
 
+  // ============================
+  // ✅ PDF state
+  // ============================
+  bool _generatingPdf = false;
+
+  // ============================
+  // ✅ NUEVO: filtros
+  // ============================
+  DateTimeRange? _eventsRange; // filtro informe eventos
+  String? _selectedWorkerId; // docId/uid del trabajador
+  String? _selectedWorkerName; // nombre del trabajador
+
   @override
   void initState() {
     super.initState();
-    _loadEmpresaIdForAdmin();
+
     _eventSearchCtrl.addListener(() {
+      if (!mounted) return;
       setState(() => _eventSearch = _eventSearchCtrl.text.trim().toLowerCase());
     });
+
+    _resolveEmpresaIdRobusto();
   }
 
   @override
@@ -43,40 +66,165 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
     super.dispose();
   }
 
-  /// ✅ Basado en TU BD:
-  /// Busca en empresas/*/Administradores where Email == email_logueado
-  /// Si encuentra, esa empresa es la del admin.
-  Future<void> _loadEmpresaIdForAdmin() async {
+  // ============================
+  // ✅ generar + compartir/descargar PDF
+  // ============================
+  Future<void> _downloadPdf({
+    required String filename,
+    required Future<Uint8List> Function() buildBytes,
+  }) async {
+    if (_generatingPdf) return;
+
+    setState(() => _generatingPdf = true);
+    try {
+      final bytes = await buildBytes();
+
+      if (kIsWeb) {
+        // ✅ WEB: abre diálogo del navegador (Imprimir / Guardar como PDF)
+        await Printing.layoutPdf(onLayout: (_) async => bytes);
+      } else {
+        // ✅ ANDROID / iOS: compartir/guardar
+        await Printing.sharePdf(bytes: bytes, filename: filename);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error generando PDF: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _generatingPdf = false);
+    }
+  }
+
+  // ============================
+  // ✅ helpers de rango fechas (Eventos)
+  // ============================
+  DateTimeRange _thisWeekRange() {
+    final now = DateTime.now();
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    final start = DateTime(monday.year, monday.month, monday.day);
+    final end = start.add(const Duration(days: 6));
+    return DateTimeRange(start: start, end: end);
+  }
+
+  DateTimeRange _thisMonthRange() {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, 1);
+    final end = DateTime(now.year, now.month + 1, 0);
+    return DateTimeRange(start: start, end: end);
+  }
+
+  DateTimeRange _last30DaysRange() {
+    final now = DateTime.now();
+    final end = DateTime(now.year, now.month, now.day);
+    final start = end.subtract(const Duration(days: 30));
+    return DateTimeRange(start: start, end: end);
+  }
+
+  String _rangeLabel() {
+    if (_eventsRange == null) return 'Todos';
+    final f = DateFormat('dd/MM/yyyy');
+    return '${f.format(_eventsRange!.start)} - ${f.format(_eventsRange!.end)}';
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final initial = _eventsRange ?? DateTimeRange(start: now, end: now);
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(now.year + 2),
+      initialDateRange: initial,
+    );
+    if (picked == null) return;
+    if (!mounted) return;
+    setState(() => _eventsRange = picked);
+  }
+
+  // ============================
+  // ✅ RESOLVER EMPRESA ID (ROBUSTO)
+  // ============================
+  Future<void> _resolveEmpresaIdRobusto() async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       final email = user?.email?.trim().toLowerCase();
 
-      if (user == null || email == null || email.isEmpty) {
-        setState(() => _error = 'No hay usuario logueado (o no tiene email).');
-        return;
-      }
+      final empresaId = await _resolveEmpresaIdViaCollectionGroup(email!)
+          .timeout(const Duration(seconds: 8));
 
-      final empresas = await _db.collection('empresas').get();
+      if (!mounted) return;
+      setState(() => _empresaId = empresaId);
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() => _error = 'Tiempo de espera agotado detectando empresa. Reintenta.');
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition') {
+        try {
+          final user = FirebaseAuth.instance.currentUser;
+          final email = user?.email?.trim().toLowerCase();
+          if (email == null || email.isEmpty) rethrow;
 
-      for (final emp in empresas.docs) {
-        final adminsSnap = await _db
-            .collection('empresas')
-            .doc(emp.id)
-            .collection('Administradores')
-            .where('Email', isEqualTo: email)
-            .limit(1)
-            .get();
+          final empresaId = await _resolveEmpresaIdEscaneandoEmpresas(email)
+              .timeout(const Duration(seconds: 12));
 
-        if (adminsSnap.docs.isNotEmpty) {
-          setState(() => _empresaId = emp.id);
+          if (!mounted) return;
+          setState(() => _empresaId = empresaId);
+          return;
+        } catch (e2) {
+          if (!mounted) return;
+          setState(() => _error = 'Error detectando empresa (fallback): $e2');
           return;
         }
       }
 
-      setState(() => _error = 'Tu email no está en Administradores de ninguna empresa.');
+      if (!mounted) return;
+      setState(() => _error = 'Error detectando empresa del admin: ${e.message ?? e.code}');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _error = 'Error detectando empresa del admin: $e');
     }
+  }
+
+  Future<String> _resolveEmpresaIdViaCollectionGroup(String email) async {
+    final snap = await _db
+        .collectionGroup('Administradores')
+        .where('Email', isEqualTo: email)
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) {
+      throw Exception('Tu email no está en Administradores de ninguna empresa.');
+    }
+
+    final adminDoc = snap.docs.first;
+    final empresaDoc = adminDoc.reference.parent.parent;
+    final empresaId = empresaDoc?.id;
+
+    if (empresaId == null || empresaId.isEmpty) {
+      throw Exception('No se pudo detectar la empresa del administrador.');
+    }
+
+    return empresaId;
+  }
+
+  Future<String> _resolveEmpresaIdEscaneandoEmpresas(String email) async {
+    final empresasSnap = await _db.collection('empresas').get();
+
+    for (final emp in empresasSnap.docs) {
+      final adminsSnap = await _db
+          .collection('empresas')
+          .doc(emp.id)
+          .collection('Administradores')
+          .where('Email', isEqualTo: email)
+          .limit(1)
+          .get();
+
+      if (adminsSnap.docs.isNotEmpty) {
+        return emp.id;
+      }
+    }
+
+    throw Exception('Tu email no está en Administradores de ninguna empresa.');
   }
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _eventosStream(String empresaId) {
@@ -127,17 +275,30 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(_error!, textAlign: TextAlign.center),
+      return Scaffold(
+        backgroundColor: _bg,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _textDark,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
         ),
       );
     }
 
     final empresaId = _empresaId;
     if (empresaId == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Scaffold(
+        backgroundColor: _bg,
+        body: Center(child: CircularProgressIndicator()),
+      );
     }
 
     return Scaffold(
@@ -186,32 +347,32 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                   if (snap.hasError) {
                     return Text('Error cargando eventos: ${snap.error}');
                   }
-                  if (!snap.hasData) {
-                    return const LinearProgressIndicator();
-                  }
+                  if (!snap.hasData) return const LinearProgressIndicator();
 
                   final docs = snap.data!.docs;
                   if (docs.isEmpty) return const Text('No hay eventos.');
 
-                  // Filtrado por nombre (buscador)
                   final filtered = _eventSearch.isEmpty
                       ? docs
                       : docs.where((d) {
-                          final nombre =
-                              (d.data()['nombre'] ?? '').toString().toLowerCase();
+                          final nombre = (d.data()['nombre'] ?? '')
+                              .toString()
+                              .toLowerCase();
                           return nombre.contains(_eventSearch);
                         }).toList();
 
-                  // Si no hay seleccionado, el primero del conjunto filtrado
-                  if ((_selectedEventoId == null ||
-                          !docs.any((d) => d.id == _selectedEventoId)) &&
-                      docs.isNotEmpty) {
-                    _selectedEventoId = docs.first.id;
-                  }
-                  if (_eventSearch.isNotEmpty &&
-                      filtered.isNotEmpty &&
-                      !filtered.any((d) => d.id == _selectedEventoId)) {
-                    _selectedEventoId = filtered.first.id;
+                  String? safeSelected = _selectedEventoId;
+                  final exists =
+                      safeSelected != null && filtered.any((d) => d.id == safeSelected);
+
+                  if (!exists) {
+                    safeSelected = filtered.isNotEmpty ? filtered.first.id : null;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      if (_selectedEventoId != safeSelected) {
+                        setState(() => _selectedEventoId = safeSelected);
+                      }
+                    });
                   }
 
                   return Column(
@@ -226,7 +387,6 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                       ),
                       const SizedBox(height: 10),
 
-                      // Buscador evento
                       TextField(
                         controller: _eventSearchCtrl,
                         decoration: InputDecoration(
@@ -255,9 +415,8 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                       ),
                       const SizedBox(height: 12),
 
-                      // Dropdown filtrado
                       DropdownButtonFormField<String>(
-                        value: _selectedEventoId,
+                        value: safeSelected,
                         decoration: InputDecoration(
                           isDense: true,
                           labelText: 'Selecciona un evento',
@@ -285,7 +444,10 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                         const SizedBox(height: 10),
                         const Text(
                           'No hay eventos que coincidan con la búsqueda.',
-                          style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            color: _textGrey,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ],
@@ -296,13 +458,300 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
             const SizedBox(height: 14),
 
+            // ============================
+            // ✅ CARD INFORMES con filtros
+            // ============================
+            if (_selectedEventoId != null) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: _card,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: _border),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x14000000),
+                      blurRadius: 24,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Informes',
+                      style: TextStyle(
+                        color: _textDark,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ✅ Filtro de fechas para informe de eventos
+                    Row(
+                      children: [
+                        const Text(
+                          'Eventos:',
+                          style: TextStyle(
+                            color: _textGrey,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: _border),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.date_range, size: 18, color: _textGrey),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _rangeLabel(),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: _textDark,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        PopupMenuButton<String>(
+                          tooltip: 'Filtrar',
+                          onSelected: (v) async {
+                            if (v == 'todos') setState(() => _eventsRange = null);
+                            if (v == 'semana') setState(() => _eventsRange = _thisWeekRange());
+                            if (v == 'mes') setState(() => _eventsRange = _thisMonthRange());
+                            if (v == '30') setState(() => _eventsRange = _last30DaysRange());
+                            if (v == 'custom') await _pickCustomRange();
+                          },
+                          itemBuilder: (context) => const [
+                            PopupMenuItem(value: 'todos', child: Text('Todos')),
+                            PopupMenuItem(value: 'semana', child: Text('Esta semana')),
+                            PopupMenuItem(value: 'mes', child: Text('Este mes')),
+                            PopupMenuItem(value: '30', child: Text('Últimos 30 días')),
+                            PopupMenuItem(value: 'custom', child: Text('Rango personalizado')),
+                          ],
+                          child: Container(
+                            height: 44,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: _border),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(Icons.tune, size: 18, color: _blue),
+                                SizedBox(width: 8),
+                                Text('Filtro', style: TextStyle(fontWeight: FontWeight.w800)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // ✅ Selector de trabajador para actividad global
+                    StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: _db
+                          .collection('empresas')
+                          .doc(empresaId)
+                          .collection('trabajadores')
+                          .orderBy('nombre', descending: false)
+                          .snapshots(),
+                      builder: (context, snapW) {
+                        if (!snapW.hasData) {
+                          return const LinearProgressIndicator();
+                        }
+
+                        final wdocs = snapW.data!.docs;
+                        if (wdocs.isEmpty) {
+                          return const Text(
+                            'No hay trabajadores.',
+                            style: TextStyle(
+                              color: _textGrey,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          );
+                        }
+
+                        // Mantener selección válida
+                        final exists = _selectedWorkerId != null &&
+                            wdocs.any((d) => d.id == _selectedWorkerId);
+
+                        if (!exists) {
+                          final first = wdocs.first;
+                          final data = first.data();
+                          final name = (data['nombre'] ??
+                                  data['fullName'] ??
+                                  data['email'] ??
+                                  'Trabajador')
+                              .toString();
+
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (!mounted) return;
+                            setState(() {
+                              _selectedWorkerId = first.id;
+                              _selectedWorkerName = name;
+                            });
+                          });
+                        }
+
+                        return DropdownButtonFormField<String>(
+                          value: _selectedWorkerId,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            labelText: 'Trabajador (para actividad)',
+                            labelStyle: const TextStyle(color: _textGrey),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          items: wdocs.map((d) {
+                            final data = d.data();
+                            final name = (data['nombre'] ??
+                                    data['fullName'] ??
+                                    data['email'] ??
+                                    'Trabajador')
+                                .toString();
+                            return DropdownMenuItem(
+                              value: d.id,
+                              child: Text(
+                                name,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w700),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            final doc = wdocs.firstWhere((e) => e.id == v);
+                            final data = doc.data();
+                            final name = (data['nombre'] ??
+                                    data['fullName'] ??
+                                    data['email'] ??
+                                    'Trabajador')
+                                .toString();
+                            setState(() {
+                              _selectedWorkerId = v;
+                              _selectedWorkerName = name;
+                            });
+                          },
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        _ReportButton(
+                          loading: _generatingPdf,
+                          icon: Icons.assignment_turned_in_outlined,
+                          label: 'Disponibilidad',
+                          onTap: () async {
+                            final eventoId = _selectedEventoId!;
+                            final file = 'informe_disponibilidad_$eventoId.pdf';
+
+                            await _downloadPdf(
+                              filename: file,
+                              buildBytes: () => AdminReports.buildDisponibilidadYAsignaciones(
+                                db: _db,
+                                empresaId: empresaId,
+                                eventoId: eventoId,
+                              ),
+                            );
+                          },
+                        ),
+                        _ReportButton(
+                          loading: _generatingPdf,
+                          icon: Icons.event_note_outlined,
+                          label: 'Eventos',
+                          onTap: () async {
+                            final file = 'informe_eventos_$empresaId.pdf';
+
+                            await _downloadPdf(
+                              filename: file,
+                              buildBytes: () => AdminReports.buildInformeEventos(
+                                db: _db,
+                                empresaId: empresaId,
+                                range: _eventsRange,
+                              ),
+                            );
+                          },
+                        ),
+                        _ReportButton(
+                          loading: _generatingPdf,
+                          icon: Icons.person_outline,
+                          label: 'Actividad',
+                          onTap: () async {
+                            final workerId = _selectedWorkerId;
+                            final workerName = _selectedWorkerName;
+
+                            if (workerId == null || workerName == null || workerName.isEmpty) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Selecciona un trabajador.')),
+                              );
+                              return;
+                            }
+
+                            final safeName = workerName.replaceAll(
+                              RegExp(r'[^a-zA-Z0-9_-]+'),
+                              '_',
+                            );
+                            final file = 'actividad_${safeName}.pdf';
+
+                            await _downloadPdf(
+                              filename: file,
+                              buildBytes: () => AdminReports.buildActividadTrabajadorGlobal(
+                                db: _db,
+                                empresaId: empresaId,
+                                trabajadorId: workerId,
+                                trabajadorNombre: workerName,
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+
+                    if (_generatingPdf) ...[
+                      const SizedBox(height: 12),
+                      const LinearProgressIndicator(),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
+
             // ====== GRID ASISTENTES ======
             Expanded(
-              child: _selectedEventoId == null
+              child: (_selectedEventoId == null)
                   ? const Center(
                       child: Text(
                         'Selecciona un evento.',
-                        style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                        style: TextStyle(
+                          color: _textGrey,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     )
                   : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -324,9 +773,12 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                         if (docs.isEmpty) {
                           return const Center(
                             child: Text(
-                              'No hay trabajadores con "asistio = true" en este evento.',
+                              'No hay trabajadores seleccionados con asistencia para este evento',
                               textAlign: TextAlign.center,
-                              style: TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                color: _textGrey,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           );
                         }
@@ -390,7 +842,6 @@ class _PaymentWorkerCard extends StatelessWidget {
   static const Color _border = Color(0xFFE5E7EB);
   static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
-  static const Color _blue = Color(0xFF2563EB);
 
   final String nombre;
   final String rol;
@@ -511,7 +962,8 @@ class _PaymentWorkerCard extends StatelessWidget {
     final parts = nombreCompleto.trim().split(RegExp(r'\s+'));
     if (parts.isEmpty) return '?';
     final first = parts.first.isNotEmpty ? parts.first[0].toUpperCase() : '';
-    final second = parts.length > 1 && parts[1].isNotEmpty ? parts[1][0].toUpperCase() : '';
+    final second =
+        parts.length > 1 && parts[1].isNotEmpty ? parts[1][0].toUpperCase() : '';
     final res = (first + second).trim();
     return res.isEmpty ? '?' : res;
   }
@@ -540,6 +992,50 @@ class _PaidChip extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.w800,
           color: fg,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================
+// ✅ BOTÓN REUTILIZABLE DE INFORME
+// ============================
+class _ReportButton extends StatelessWidget {
+  final bool loading;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ReportButton({
+    required this.loading,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const border = Color(0xFFE5E7EB);
+    const blue = Color(0xFF2563EB);
+    const textDark = Color(0xFF111827);
+
+    return SizedBox(
+      height: 44,
+      child: OutlinedButton.icon(
+        onPressed: loading ? null : onTap,
+        icon: Icon(icon, size: 18, color: loading ? Colors.grey : blue),
+        label: Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: loading ? Colors.grey : textDark,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: border),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          backgroundColor: Colors.white,
         ),
       ),
     );

@@ -523,15 +523,23 @@ class _ToPill extends StatelessWidget {
   final String text;
   const _ToPill({required this.text});
 
-  String _pretty(String raw) {
-    if (raw == 'todos') return 'Para: Todos';
-    if (raw.startsWith('rol:')) {
-      final r = raw.replaceFirst('rol:', '');
-      if (r.isEmpty) return 'Para: Rol';
-      return 'Para: ${r[0].toUpperCase()}${r.substring(1)}';
-    }
-    return 'Para: $raw';
+String _pretty(String raw) {
+  if (raw == 'todos') return 'Para: Todos';
+  
+  if (raw.startsWith('rol:')) {
+    final r = raw.replaceFirst('rol:', '');
+    if (r.isEmpty) return 'Para: Rol';
+    return 'Para: ${r[0].toUpperCase()}${r.substring(1)}';
   }
+
+  // NUEVO: Si el texto es un ID largo (letras y números sin espacios)
+  // le ponemos un nombre genérico para que no quede feo
+  if (raw.length > 15 && !raw.contains(' ')) {
+    return 'Para: Evento específico'; 
+  }
+
+  return 'Para: $raw';
+}
 
   @override
   Widget build(BuildContext context) {

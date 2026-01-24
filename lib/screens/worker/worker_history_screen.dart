@@ -15,6 +15,14 @@ class WorkerHistoryScreen extends StatefulWidget {
 }
 
 class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
+  // ====== THEME (Turneo / Admin) ======
+  static const Color _bg = Color(0xFFF6F8FC);
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
+  static const Color _blue = Color(0xFF2563EB);
+
   String _selectedFilter = 'Todos';
 
   @override
@@ -28,10 +36,13 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
 
     return SafeArea(
       child: Scaffold(
-        backgroundColor: const Color(0xFFF3F4F6),
+        backgroundColor: _bg,
         body: StreamBuilder<List<Evento>>(
           stream: FirestoreService.instance.listenEventos(empresaId),
           builder: (context, eventosSnap) {
+            if (eventosSnap.hasError) {
+              return Center(child: Text('Error cargando eventos: ${eventosSnap.error}'));
+            }
             if (!eventosSnap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
@@ -40,9 +51,11 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
             final Map<String, Evento> eventoById = {for (final e in eventos) e.id: e};
 
             return StreamBuilder<List<DisponibilidadEvento>>(
-              stream: FirestoreService.instance
-                  .listenSolicitudesDisponibilidadTrabajador(user.uid),
+              stream: FirestoreService.instance.listenSolicitudesDisponibilidadTrabajador(user.uid),
               builder: (context, dispoSnap) {
+                if (dispoSnap.hasError) {
+                  return Center(child: Text('Error cargando historial: ${dispoSnap.error}'));
+                }
                 if (!dispoSnap.hasData) {
                   return const Center(child: CircularProgressIndicator());
                 }
@@ -62,10 +75,8 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
                   all.add(
                     HistoryEvent(
                       id: e.id,
-                      title: e.nombre,
+                      title: (e.nombre.trim().isEmpty) ? 'Evento' : e.nombre.trim(),
                       date: DateFormat("d MMM yyyy", "es_ES").format(e.fechaInicio),
-                      time:
-                          "${DateFormat("HH:mm").format(e.fechaInicio)} – ${DateFormat("HH:mm").format(e.fechaFin)}",
                       role: (s.trabajadorRol.trim().isEmpty) ? "—" : s.trabajadorRol.trim(),
                       location: _addressForEvento(e),
                       status: status,
@@ -94,17 +105,25 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header (igual)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 18, 16, 10),
-                      child: Row(
-                        children: [
-                          Icon(Icons.history, size: 24),
-                          SizedBox(width: 8),
+                    // Header (Turneo)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
                           Text(
                             'Historial',
                             style: TextStyle(
                               fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              color: _textDark,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Tus eventos y su estado',
+                            style: TextStyle(
+                              color: _textGrey,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -112,7 +131,7 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
                       ),
                     ),
 
-                    // Filtros (igual)
+                    // Filtros (Turneo)
                     Padding(
                       padding: const EdgeInsets.only(left: 16),
                       child: SingleChildScrollView(
@@ -120,9 +139,9 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
                         child: Row(
                           children: [
                             _filter('Todos'),
+                            _filter('Próximos'),
                             _filter('Completados'),
                             _filter('Rechazados'),
-                            _filter('Próximos'),
                             _filter('Cancelados'),
                           ],
                         ),
@@ -131,13 +150,15 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
 
                     const SizedBox(height: 12),
 
-                    // Lista (igual)
                     Expanded(
                       child: filtered.isEmpty
                           ? const Center(
                               child: Text(
                                 "No hay eventos en este filtro",
-                                style: TextStyle(color: Color(0xFF6B7280)),
+                                style: TextStyle(
+                                  color: _textGrey,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             )
                           : ListView.builder(
@@ -168,47 +189,42 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
         label: Text(
           label,
           style: TextStyle(
-            color: selected ? Colors.white : const Color(0xFF111827),
-            fontWeight: FontWeight.w500,
+            color: selected ? Colors.white : _textDark,
+            fontWeight: FontWeight.w800,
           ),
         ),
         selected: selected,
         onSelected: (_) => setState(() => _selectedFilter = label),
-        selectedColor: const Color(0xFF111827),
+        selectedColor: _blue,
         backgroundColor: Colors.white,
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
+        side: const BorderSide(color: _border),
         labelPadding: const EdgeInsets.symmetric(horizontal: 14),
       ),
     );
   }
 
   // ─────────────────────────────────────────────────────────────
-  // LÓGICA: estado del chip + texto extra
+  // LÓGICA: estado del chip + texto extra (tu sistema)
   // ─────────────────────────────────────────────────────────────
 
   EventStatus _statusFor(Evento e, DisponibilidadEvento s, DateTime now) {
-    final evEstado = e.estado.toLowerCase();
+    final evEstado = (e.estado).toLowerCase();
 
-    // Cancelado por empresa
     if (evEstado == 'cancelado') return EventStatus.cancelled;
-
-    // Rechazado por trabajador
     if (s.estado.toLowerCase() == 'rechazado') return EventStatus.rejected;
 
-    // Aceptado + asignado => próximo o completado
     if (s.asignado == true) {
       if (e.fechaFin.isBefore(now)) return EventStatus.completed;
       return EventStatus.upcoming;
     }
 
-    // Aceptado pero NO asignado, o pendiente => no es próximo
-    // Lo metemos como rechazado para que aparezca en "Rechazados" (histórico negativo / no asignado)
+    // Aceptado pero no asignado o pendiente -> lo tratamos como rechazo histórico
     return EventStatus.rejected;
   }
 
   String _extraInfoFor(Evento e, DisponibilidadEvento s, DateTime now) {
-    final evEstado = e.estado.toLowerCase();
-    final sEstado = s.estado.toLowerCase();
+    final evEstado = (e.estado).toLowerCase();
+    final sEstado = (s.estado).toLowerCase();
 
     if (evEstado == 'cancelado') return "Cancelado por empresa";
     if (sEstado == 'rechazado') return "Rechazado";
@@ -226,12 +242,13 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
     final parts = <String>[];
     if (e.ciudad.trim().isNotEmpty) parts.add(e.ciudad.trim());
     if (e.direccion.trim().isNotEmpty) parts.add(e.direccion.trim());
-    return parts.isEmpty ? "—" : parts.join(' - ');
+    return parts.isEmpty ? "—" : parts.join(' · ');
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// MODEL (mismo diseño, sólo añadimos sortDate para ordenar)
+// MODEL
+// (✅ Quitadas horas y precio: no existen aquí)
 // ─────────────────────────────────────────────────────────────
 
 enum EventStatus { completed, rejected, upcoming, cancelled }
@@ -240,19 +257,16 @@ class HistoryEvent {
   final String id;
   final String title;
   final String date;
-  final String time;
   final String role;
   final String location;
   final EventStatus status;
   final String extraInfo;
-
   final DateTime sortDate;
 
   HistoryEvent({
     required this.id,
     required this.title,
     required this.date,
-    required this.time,
     required this.role,
     required this.location,
     required this.status,
@@ -262,13 +276,18 @@ class HistoryEvent {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CARD (SIN CAMBIOS DE DISEÑO)
+// CARD (Diseño Turneo)
 // ─────────────────────────────────────────────────────────────
 
 class _HistoryCard extends StatelessWidget {
   final HistoryEvent event;
 
   const _HistoryCard({required this.event});
+
+  static const Color _card = Colors.white;
+  static const Color _border = Color(0xFFE5E7EB);
+  static const Color _textDark = Color(0xFF111827);
+  static const Color _textGrey = Color(0xFF6B7280);
 
   Color _statusColor(EventStatus s) {
     switch (s) {
@@ -298,17 +317,20 @@ class _HistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = _statusColor(event.status);
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _card,
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [
+        border: Border.all(color: _border),
+        boxShadow: const [
           BoxShadow(
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-            color: Colors.black.withOpacity(0.05),
+            color: Color(0x12000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
         ],
       ),
@@ -321,42 +343,47 @@ class _HistoryCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   event.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w900,
+                    color: _textDark,
                   ),
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: _statusColor(event.status).withOpacity(0.12),
+                  color: c.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   _statusText(event.status),
                   style: TextStyle(
-                    color: _statusColor(event.status),
+                    color: c,
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
 
-          // Fecha + Hora
+          // Fecha (✅ sin horas)
           Row(
             children: [
-              const Icon(Icons.calendar_today_outlined, size: 16),
+              const Icon(Icons.calendar_today_outlined, size: 16, color: _textGrey),
               const SizedBox(width: 6),
-              Text(event.date),
-              const SizedBox(width: 16),
-              const Icon(Icons.schedule, size: 16),
-              const SizedBox(width: 6),
-              Text(event.time),
+              Text(
+                event.date,
+                style: const TextStyle(
+                  color: _textDark,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ],
           ),
 
@@ -365,9 +392,19 @@ class _HistoryCard extends StatelessWidget {
           // Rol
           Row(
             children: [
-              const Icon(Icons.work_outline, size: 16),
+              const Icon(Icons.work_outline, size: 16, color: _textGrey),
               const SizedBox(width: 6),
-              Text(event.role),
+              Expanded(
+                child: Text(
+                  event.role,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _textDark,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
             ],
           ),
 
@@ -377,9 +414,17 @@ class _HistoryCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.location_on_outlined, size: 16),
+              const Icon(Icons.location_on_outlined, size: 16, color: _textGrey),
               const SizedBox(width: 6),
-              Expanded(child: Text(event.location)),
+              Expanded(
+                child: Text(
+                  event.location,
+                  style: const TextStyle(
+                    color: _textGrey,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ],
           ),
 
@@ -389,9 +434,9 @@ class _HistoryCard extends StatelessWidget {
           Text(
             event.extraInfo,
             style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w500,
+              fontSize: 12,
+              color: _textGrey,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
