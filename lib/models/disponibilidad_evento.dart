@@ -42,6 +42,8 @@ class DisponibilidadEvento {
     );
   }
 
+  get ubicacionNombre => null;
+
   Map<String, dynamic> toJson() {
     return {
       'eventoId': eventoId,

@@ -282,24 +282,49 @@ class _LoginScreenModernState extends State<LoginScreenModern> {
 
                       const SizedBox(height: 12),
 
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: _rememberMe,
-                            onChanged: (v) => setState(() => _rememberMe = v ?? false),
-                          ),
-                          const Text('Recordarme', style: TextStyle(fontWeight: FontWeight.w700)),
-                          const Spacer(),
-                          TextButton(
-                            onPressed: _forgotPassword,
-                            child: const Text(
-                              '¿Olvidaste tu contraseña?',
-                              style: TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.w500),
-                            ),
-                          ),
-                        ],
-                      ),
-
+Wrap(
+  crossAxisAlignment: WrapCrossAlignment.center,
+  spacing: 8,
+  runSpacing: 6,
+  children: [
+    Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Checkbox(
+          value: _rememberMe,
+          onChanged: (v) => setState(() => _rememberMe = v ?? false),
+        ),
+        const Text(
+          'Recordarme',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ],
+    ),
+    Align(
+      alignment: Alignment.centerRight,
+      child: TextButton(
+        onPressed: _forgotPassword,
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        child: const FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '¿Olvidaste tu contraseña?',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Color(0xFF2563EB),
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ),
+    ),
+  ],
+),
                       const SizedBox(height: 6),
 
                       SizedBox(

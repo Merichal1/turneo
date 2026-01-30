@@ -20,18 +20,20 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
-  // ✅ Mantiene estado de cada pantalla (shell fijo)
-  // ❗ NO lo marques const. Evita problemas con pantallas no-const o cambios en hot reload.
+  // ✅ Mantiene estado de cada pantalla
   late final List<Widget> _pages = [
     const AdminHomeScreen(),               // 0 – Dashboard
     const AdminEventsScreen(),             // 1 – Eventos
-    const AdminWorkersScreen(),            // 2 – Trabajadores
+
+    // 👇 CLAVE: quito const aquí para evitar "Not a constant expression"
+    AdminWorkersScreen(),                  // 2 – Trabajadores
+
     const AdminNotificacionesScreen(),     // 3 – Notificaciones
     const AdminChatScreen(),               // 4 – Chat
     const AdminPaymentsHistoryScreen(),    // 5 – Gestión
   ];
 
-  // 🎨 Estilo Turneo (login)
+  // 🎨 Estilo Turneo
   static const Color _bg = Color(0xFFF6F8FC);
   static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
@@ -53,21 +55,17 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
 
         final user = snap.data;
 
-        // ✅ Si no hay usuario, redirige una sola vez
         if (user == null) {
           if (!_redirecting) {
             _redirecting = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
               Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
-              // Si tu ruta es /login:
-              // Navigator.of(context).pushNamedAndRemoveUntil('/login', (_) => false);
             });
           }
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
 
-        // ✅ Reset del flag si vuelve a haber user
         _redirecting = false;
 
         return LayoutBuilder(
@@ -83,9 +81,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     );
   }
 
-  // ---------------------------
-  // WIDE (web/desktop): side menu fijo
-  // ---------------------------
   Widget _buildWideScaffold(BuildContext context, User user) {
     return Scaffold(
       backgroundColor: _bg,
@@ -106,9 +101,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     );
   }
 
-  // ---------------------------
-  // NARROW (mobile/tablet): drawer + bottom nav (compact)
-  // ---------------------------
   Widget _buildNarrowScaffold(BuildContext context, User user, {required bool isCompact}) {
     return Scaffold(
       key: _scaffoldKey,
@@ -116,7 +108,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
       drawer: Drawer(
         child: _buildDrawerMenu(context, user),
       ),
-      // ✅ Sin AppBar aquí para que NO “salte” ni duplique con las pantallas internas
       body: SafeArea(
         child: IndexedStack(
           index: _selectedIndex,
@@ -161,9 +152,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     return 3;
   }
 
-  // ---------------------------
-  // Drawer menu
-  // ---------------------------
   Widget _buildDrawerMenu(BuildContext context, User user) {
     final email = (user.email ?? '').trim();
 
@@ -215,8 +203,8 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: () async {
-                  Navigator.of(context).pop(); // cierra drawer
-                  await FirebaseAuth.instance.signOut(); // el StreamBuilder redirige
+                  Navigator.of(context).pop();
+                  await FirebaseAuth.instance.signOut();
                 },
               ),
             ),
@@ -258,9 +246,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     );
   }
 
-  // ---------------------------
-  // Side menu (wide)
-  // ---------------------------
   Widget _buildSideMenu(BuildContext context, User user) {
     final email = (user.email ?? '').trim();
 
@@ -340,7 +325,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                   onPressed: () async {
-                    await FirebaseAuth.instance.signOut(); // el StreamBuilder redirige
+                    await FirebaseAuth.instance.signOut();
                   },
                 ),
               ),
@@ -357,10 +342,6 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
     setState(() => _selectedIndex = index);
   }
 }
-
-// ------------------------------------
-// UI pieces
-// ------------------------------------
 
 class _TurneoBrandHeader extends StatelessWidget {
   const _TurneoBrandHeader();

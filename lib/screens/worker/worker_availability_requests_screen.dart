@@ -408,6 +408,7 @@ class _SolicitudModernCard extends StatelessWidget {
                     child: const Text(
                       'Aceptar',
                       style: TextStyle(fontWeight: FontWeight.w900),
+                      selectionColor: Color.fromARGB(0, 234, 234, 236),
                     ),
                   ),
                 ),

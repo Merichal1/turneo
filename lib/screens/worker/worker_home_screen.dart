@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:turneo/screens/auth/turneo_start_screen.dart';
 
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
@@ -56,9 +57,23 @@ class _WorkerHomeScreenState extends State<WorkerHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      return const Scaffold(body: Center(child: Text('Sesión no válida')));
-    }
+if (user == null) {
+  // ⚠️ No hay sesión -> mandamos a Welcome y limpiamos stack
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const TurneoStartScreen()),
+      (route) => false,
+    );
+  });
+
+  // UI momentánea mientras redirige
+  return const Scaffold(
+    backgroundColor: _bg,
+    body: Center(child: CircularProgressIndicator()),
+  );
+}
+
 
     // 1) Stream A: solicitudes (para badge)
     final solicitudesStream = FirestoreService.instance

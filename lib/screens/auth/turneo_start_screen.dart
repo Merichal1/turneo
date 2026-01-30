@@ -203,7 +203,7 @@ class _RightCard extends StatelessWidget {
                   child: const Text('Iniciar sesión', style: TextStyle(fontWeight: FontWeight.w800)),
                 ),
               ),
-              const SizedBox(height: 14),
+            const SizedBox(height: 14),
             ],
           ),
         ),

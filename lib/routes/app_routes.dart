@@ -4,12 +4,10 @@ import 'package:flutter/widgets.dart';
 import '../screens/common/splash_screen.dart';
 import '../screens/common/error_screen.dart';
 
-// AUTH (NUEVO)
+// AUTH
 import '../screens/auth/turneo_start_screen.dart';
 import '../screens/Login/login_screen.dart';
-// 👉 OJO: aquí pon el import real de tu registro NUEVO
-import '../screens/Signup/signup_screen.dart'; // si tu registro moderno está aquí
-// si NO existe, me lo dices y te lo creo en 1 archivo.
+import '../screens/Signup/signup_screen.dart';
 
 // ADMIN
 import '../screens/admin/admin_shell_screen.dart';
@@ -66,13 +64,16 @@ class Routes {
     // Auth NUEVA
     welcome: (_) => const TurneoStartScreen(),
     loginZip: (_) => const LoginScreenModern(),
-    registerZip: (_) => const SignUpScreen(), // ⚠️ si tu clase se llama diferente, cámbiala aquí
+    registerZip: (_) => const SignUpScreen(),
 
     // Admin
     adminShell: (_) => const AdminShellScreen(),
     adminHome: (_) => const AdminHomeScreen(),
     adminEvents: (_) => const AdminEventsScreen(),
-    adminWorkers: (_) => const AdminWorkersScreen(),
+
+    // 👇 CLAVE: quito const aquí para evitar el error del constructor
+    adminWorkers: (_) => AdminWorkersScreen(),
+
     adminChat: (_) => const AdminChatScreen(),
     adminImport: (_) => const AdminImportScreen(),
     adminPaymentsHistory: (_) => const AdminPaymentsHistoryScreen(),

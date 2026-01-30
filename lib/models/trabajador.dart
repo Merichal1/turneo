@@ -71,6 +71,8 @@ class Trabajador {
     );
   }
 
+  get photoUrl => null;
+
   Map<String, dynamic> toMap() {
     return {
       'activo': activo,

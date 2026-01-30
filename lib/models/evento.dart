@@ -108,6 +108,8 @@ class Evento {
     );
   }
 
+  get ubicacionNombre => null;
+
   Map<String, dynamic> toMap() {
     final total = rolesRequeridos.values.fold<int>(0, (s, v) => s + v);
 

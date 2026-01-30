@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../Login/login_screen.dart';
+
 
 import '../../config/app_config.dart';
 
@@ -92,6 +94,52 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
     if (ts is Timestamp) return ts.toDate();
     return null;
   }
+
+  Future<void> _confirmAndLogout() async {
+  final bool? ok = await showDialog<bool>(
+    context: context,
+    barrierDismissible: true,
+    builder: (ctx) => AlertDialog(
+      title: const Text(
+        'Cerrar sesión',
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+      content: const Text('¿Estás seguro de que quieres cerrar sesión?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancelar'),
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFFDC2626),
+            foregroundColor: Colors.white,
+            elevation: 0,
+          ),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text(
+            'Sí, salir',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  if (ok != true) return;
+
+  try {
+    await FirebaseAuth.instance.signOut();
+  } catch (_) {}
+
+  if (!mounted) return;
+
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(builder: (_) => const LoginScreenModern()),
+    (route) => false,
+  );
+}
+
 
   Future<void> _changePhoto({
     required BuildContext context,
@@ -488,19 +536,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                           }
                         },
                       ),
-                      const SizedBox(height: 10),
-                      _ActionTile(
-                        icon: Icons.devices_other_outlined,
-                        title: 'Dispositivos activos',
-                        subtitle: 'Gestión de sesiones (pendiente)',
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Gestión de sesiones (pendiente)'),
-                            ),
-                          );
-                        },
-                      ),
                     ],
                   ),
 
@@ -549,12 +584,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: () async {
-                            await FirebaseAuth.instance.signOut();
-                            if (context.mounted) {
-                              Navigator.of(context).popUntil((r) => r.isFirst);
-                            }
-                          },
+                        onPressed: _confirmAndLogout,
                           icon: const Icon(Icons.logout, size: 18),
                           label: const Text(
                             'Cerrar sesión',

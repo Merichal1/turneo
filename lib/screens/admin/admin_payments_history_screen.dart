@@ -1,300 +1,78 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
-
+import 'package:printing/printing.dart';
+import '../../config/app_config.dart';
 import '../../reports/admin_reports.dart';
 
 class AdminPaymentsHistoryScreen extends StatefulWidget {
   const AdminPaymentsHistoryScreen({super.key});
 
   @override
-  State<AdminPaymentsHistoryScreen> createState() =>
-      _AdminPaymentsHistoryScreenState();
+  State<AdminPaymentsHistoryScreen> createState() => _AdminPaymentsHistoryScreenState();
 }
 
 class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen> {
-  // ====== THEME (Turneo / Login) ======
-  static const Color _bg = Color(0xFFF6F8FC);
+  // ====== THEME ======
+  static const Color _bg = Color(0xFFF8FAFC);
   static const Color _card = Colors.white;
   static const Color _border = Color(0xFFE5E7EB);
-  static const Color _textDark = Color(0xFF111827);
-  static const Color _textGrey = Color(0xFF6B7280);
-  static const Color _blue = Color(0xFF2563EB);
+  static const Color _accent = Color(0xFF2563EB);
+  static const Color _textMain = Color(0xFF0F172A);
+  static const Color _textSecondary = Color(0xFF64748B);
+  static const Color _ok = Color(0xFF10B981);
+  static const Color _bad = Color(0xFFEF4444);
+  static const Color _warn = Color(0xFFF59E0B);
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // UI state
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchTerm = '';
+  int _tab = 0; // 0 pagos, 1 informes
+
+  // Data selection
   String? _empresaId;
   String? _selectedEventoId;
-  String? _error;
+  Map<String, dynamic>? _selectedEventoData;
 
-  final TextEditingController _eventSearchCtrl = TextEditingController();
-  String _eventSearch = '';
+  bool _isGenerating = false;
 
-  // ============================
-  // ✅ PDF state
-  // ============================
-  bool _generatingPdf = false;
+  // Range analytics (opcional, para informes globales)
+  DateTimeRange? _range;
 
-  // ============================
-  // ✅ NUEVO: filtros
-  // ============================
-  DateTimeRange? _eventsRange; // filtro informe eventos
-  String? _selectedWorkerId; // docId/uid del trabajador
-  String? _selectedWorkerName; // nombre del trabajador
+  // Worker selection for report (global)
+  String? _selectedWorkerId;
+  String? _selectedWorkerName;
 
-  @override
-  void initState() {
-    super.initState();
+@override
+void initState() {
+  super.initState();
 
-    _eventSearchCtrl.addListener(() {
-      if (!mounted) return;
-      setState(() => _eventSearch = _eventSearchCtrl.text.trim().toLowerCase());
-    });
+  // ✅ SIEMPRE disponible y no depende de queries raros
+  _empresaId = AppConfig.empresaId;
 
-    _resolveEmpresaIdRobusto();
-  }
+  _searchCtrl.addListener(() {
+    setState(() => _searchTerm = _searchCtrl.text.trim().toLowerCase());
+  });
+}
+
 
   @override
   void dispose() {
-    _eventSearchCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
-  // ============================
-  // ✅ generar + compartir/descargar PDF
-  // ============================
-  Future<void> _downloadPdf({
-    required String filename,
-    required Future<Uint8List> Function() buildBytes,
-  }) async {
-    if (_generatingPdf) return;
-
-    setState(() => _generatingPdf = true);
-    try {
-      final bytes = await buildBytes();
-
-      if (kIsWeb) {
-        // ✅ WEB: abre diálogo del navegador (Imprimir / Guardar como PDF)
-        await Printing.layoutPdf(onLayout: (_) async => bytes);
-      } else {
-        // ✅ ANDROID / iOS: compartir/guardar
-        await Printing.sharePdf(bytes: bytes, filename: filename);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error generando PDF: $e')),
-      );
-    } finally {
-      if (mounted) setState(() => _generatingPdf = false);
-    }
-  }
-
-  // ============================
-  // ✅ helpers de rango fechas (Eventos)
-  // ============================
-  DateTimeRange _thisWeekRange() {
-    final now = DateTime.now();
-    final monday = now.subtract(Duration(days: now.weekday - 1));
-    final start = DateTime(monday.year, monday.month, monday.day);
-    final end = start.add(const Duration(days: 6));
-    return DateTimeRange(start: start, end: end);
-  }
-
-  DateTimeRange _thisMonthRange() {
-    final now = DateTime.now();
-    final start = DateTime(now.year, now.month, 1);
-    final end = DateTime(now.year, now.month + 1, 0);
-    return DateTimeRange(start: start, end: end);
-  }
-
-  DateTimeRange _last30DaysRange() {
-    final now = DateTime.now();
-    final end = DateTime(now.year, now.month, now.day);
-    final start = end.subtract(const Duration(days: 30));
-    return DateTimeRange(start: start, end: end);
-  }
-
-  String _rangeLabel() {
-    if (_eventsRange == null) return 'Todos';
-    final f = DateFormat('dd/MM/yyyy');
-    return '${f.format(_eventsRange!.start)} - ${f.format(_eventsRange!.end)}';
-  }
-
-  Future<void> _pickCustomRange() async {
-    final now = DateTime.now();
-    final initial = _eventsRange ?? DateTimeRange(start: now, end: now);
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(now.year + 2),
-      initialDateRange: initial,
-    );
-    if (picked == null) return;
-    if (!mounted) return;
-    setState(() => _eventsRange = picked);
-  }
-
-  // ============================
-  // ✅ RESOLVER EMPRESA ID (ROBUSTO)
-  // ============================
-  Future<void> _resolveEmpresaIdRobusto() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      final email = user?.email?.trim().toLowerCase();
-
-      final empresaId = await _resolveEmpresaIdViaCollectionGroup(email!)
-          .timeout(const Duration(seconds: 8));
-
-      if (!mounted) return;
-      setState(() => _empresaId = empresaId);
-    } on TimeoutException {
-      if (!mounted) return;
-      setState(() => _error = 'Tiempo de espera agotado detectando empresa. Reintenta.');
-    } on FirebaseException catch (e) {
-      if (e.code == 'failed-precondition') {
-        try {
-          final user = FirebaseAuth.instance.currentUser;
-          final email = user?.email?.trim().toLowerCase();
-          if (email == null || email.isEmpty) rethrow;
-
-          final empresaId = await _resolveEmpresaIdEscaneandoEmpresas(email)
-              .timeout(const Duration(seconds: 12));
-
-          if (!mounted) return;
-          setState(() => _empresaId = empresaId);
-          return;
-        } catch (e2) {
-          if (!mounted) return;
-          setState(() => _error = 'Error detectando empresa (fallback): $e2');
-          return;
-        }
-      }
-
-      if (!mounted) return;
-      setState(() => _error = 'Error detectando empresa del admin: ${e.message ?? e.code}');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = 'Error detectando empresa del admin: $e');
-    }
-  }
-
-  Future<String> _resolveEmpresaIdViaCollectionGroup(String email) async {
-    final snap = await _db
-        .collectionGroup('Administradores')
-        .where('Email', isEqualTo: email)
-        .limit(1)
-        .get();
-
-    if (snap.docs.isEmpty) {
-      throw Exception('Tu email no está en Administradores de ninguna empresa.');
-    }
-
-    final adminDoc = snap.docs.first;
-    final empresaDoc = adminDoc.reference.parent.parent;
-    final empresaId = empresaDoc?.id;
-
-    if (empresaId == null || empresaId.isEmpty) {
-      throw Exception('No se pudo detectar la empresa del administrador.');
-    }
-
-    return empresaId;
-  }
-
-  Future<String> _resolveEmpresaIdEscaneandoEmpresas(String email) async {
-    final empresasSnap = await _db.collection('empresas').get();
-
-    for (final emp in empresasSnap.docs) {
-      final adminsSnap = await _db
-          .collection('empresas')
-          .doc(emp.id)
-          .collection('Administradores')
-          .where('Email', isEqualTo: email)
-          .limit(1)
-          .get();
-
-      if (adminsSnap.docs.isNotEmpty) {
-        return emp.id;
-      }
-    }
-
-    throw Exception('Tu email no está en Administradores de ninguna empresa.');
-  }
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> _eventosStream(String empresaId) {
-    return _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .orderBy('fechaInicio', descending: false)
-        .snapshots();
-  }
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> _asistidosStream({
-    required String empresaId,
-    required String eventoId,
-  }) {
-    return _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('disponibilidad')
-        .where('asistio', isEqualTo: true)
-        .snapshots();
-  }
-
-  Future<void> _setPagado({
-    required String empresaId,
-    required String eventoId,
-    required String disponibilidadId,
-    required bool pagado,
-  }) async {
-    await _db
-        .collection('empresas')
-        .doc(empresaId)
-        .collection('eventos')
-        .doc(eventoId)
-        .collection('disponibilidad')
-        .doc(disponibilidadId)
-        .set(
-      {
-        'pagado': pagado,
-        'pagadoEn': pagado ? FieldValue.serverTimestamp() : FieldValue.delete(),
-      },
-      SetOptions(merge: true),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Scaffold(
-        backgroundColor: _bg,
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              _error!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: _textDark,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    final empresaId = _empresaId;
-    if (empresaId == null) {
+    if (_empresaId == null) {
       return const Scaffold(
         backgroundColor: _bg,
         body: Center(child: CircularProgressIndicator()),
@@ -303,532 +81,982 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
     return Scaffold(
       backgroundColor: _bg,
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Gestión',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                color: _textDark,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Marca pagos de asistentes por evento',
-              style: TextStyle(
-                color: _textGrey,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 14),
+      body: CustomScrollView(
+        slivers: [
+          _buildSliverAppBar(),
 
-            // ====== EVENT SELECTOR CARD ======
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: _card,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: _border),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x14000000),
-                    blurRadius: 24,
-                    offset: Offset(0, 10),
+          // Selector evento + tabs
+          SliverToBoxAdapter(child: _buildTopControls()),
+
+          // Contenido según tab
+          if (_tab == 0) ...[
+            // PAGOS
+            _buildAsistentesGrid(),
+          ] else ...[
+            // INFORMES + RENDIMIENTO
+            SliverToBoxAdapter(child: _buildReportsAndAnalytics()),
+          ],
+
+          const SliverPadding(padding: EdgeInsets.only(bottom: 36)),
+        ],
+      ),
+    );
+  }
+
+  // ===========================
+  // APP BAR
+  // ===========================
+  Widget _buildSliverAppBar() {
+    return SliverAppBar(
+      expandedHeight: 118,
+      floating: true,
+      pinned: true,
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+      elevation: 0,
+      flexibleSpace: FlexibleSpaceBar(
+        titlePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Text(
+              'Gestión de Pagos e Informes',
+              style: TextStyle(
+                color: _textMain,
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
+              ),
+            ),
+            SizedBox(height: 2),
+            Text(
+              'Pagos claros • Informes profesionales • Rendimiento',
+              style: TextStyle(
+                color: _textSecondary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===========================
+  // TOP CONTROLS (evento + tabs + search)
+  // ===========================
+  Widget _buildTopControls() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      child: Column(
+        children: [
+          _CardShell(
+            child: Column(
+              children: [
+                _buildEventoSelector(),
+                const SizedBox(height: 12),
+                _buildTabs(),
+                const SizedBox(height: 12),
+                if (_tab == 0) _buildSearchBar(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (_selectedEventoId == null)
+            _HintBanner(
+              icon: Icons.info_outline,
+              text: 'Selecciona un evento para ver pagos e informes.',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventoSelector() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db
+          .collection('empresas')
+          .doc(_empresaId)
+          .collection('eventos')
+          .orderBy('fechaInicio', descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const LinearProgressIndicator(minHeight: 2);
+        }
+
+        final docs = snap.data!.docs;
+
+        return DropdownButtonFormField<String>(
+          value: _selectedEventoId,
+          decoration: _inputStyle('Seleccionar evento', Icons.event_outlined),
+          items: docs.map((d) {
+            final data = d.data();
+            final name = (data['nombre'] ?? 'Evento').toString();
+            return DropdownMenuItem(value: d.id, child: Text(name, overflow: TextOverflow.ellipsis));
+          }).toList(),
+          onChanged: (v) {
+            if (v == null) return;
+            final picked = docs.firstWhere((e) => e.id == v).data();
+            setState(() {
+              _selectedEventoId = v;
+              _selectedEventoData = picked;
+            });
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTabs() {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final isNarrow = c.maxWidth < 520;
+        return Row(
+          children: [
+            Expanded(
+              child: _TabChip(
+                selected: _tab == 0,
+                label: 'Pagos',
+                icon: Icons.payments_outlined,
+                compact: isNarrow,
+                onTap: () => setState(() => _tab = 0),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _TabChip(
+                selected: _tab == 1,
+                label: 'Informes y rendimiento',
+                icon: Icons.insights_outlined,
+                compact: isNarrow,
+                onTap: () => setState(() => _tab = 1),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchCtrl,
+      decoration: _inputStyle('Buscar trabajador...', Icons.search).copyWith(
+        hintText: 'Escribe un nombre…',
+      ),
+    );
+  }
+
+  // ===========================
+  // TAB 0: PAGOS (grid)
+  // ===========================
+  SliverToBoxAdapter _buildEmptyPaymentsHint() {
+    return const SliverToBoxAdapter(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(
+          child: Text(
+            'Selecciona un evento para gestionar pagos.',
+            style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAsistentesGrid() {
+    if (_selectedEventoId == null) return _buildEmptyPaymentsHint();
+
+    final stream = _db
+        .collection('empresas')
+        .doc(_empresaId)
+        .collection('eventos')
+        .doc(_selectedEventoId)
+        .collection('disponibilidad')
+        .where('asistio', isEqualTo: true)
+        .snapshots();
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snap) {
+        if (!snap.hasData) {
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(top: 18),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        }
+
+        final docs = snap.data!.docs;
+
+        final filtered = docs.where((d) {
+          final name = (d.data()['trabajadorNombre'] ?? '').toString().toLowerCase();
+          return name.contains(_searchTerm);
+        }).toList();
+
+        // Header KPI rápido
+        final pagados = docs.where((d) => d.data()['pagado'] == true).length;
+        final pendientes = docs.length - pagados;
+
+        return SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              _CardShell(
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    final isWide = c.maxWidth > 720;
+                    return isWide
+                        ? Row(
+                            children: [
+                              Expanded(child: _KpiTile(title: 'Asistentes', value: '${docs.length}', icon: Icons.group_outlined)),
+                              const SizedBox(width: 10),
+                              Expanded(child: _KpiTile(title: 'Pagados', value: '$pagados', icon: Icons.check_circle_outline, color: _ok)),
+                              const SizedBox(width: 10),
+                              Expanded(child: _KpiTile(title: 'Pendientes', value: '$pendientes', icon: Icons.priority_high, color: _warn)),
+                            ],
+                          )
+                        : Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(child: _KpiTile(title: 'Asistentes', value: '${docs.length}', icon: Icons.group_outlined)),
+                                  const SizedBox(width: 10),
+                                  Expanded(child: _KpiTile(title: 'Pagados', value: '$pagados', icon: Icons.check_circle_outline, color: _ok)),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              _KpiTile(title: 'Pendientes', value: '$pendientes', icon: Icons.priority_high, color: _warn),
+                            ],
+                          );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              if (filtered.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Center(child: Text('No hay resultados', style: TextStyle(color: _textSecondary))),
+                )
+              else
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final w = c.maxWidth;
+                    // tamaños amigables + sin overflow
+                    final crossAxisCount = w >= 980 ? 3 : (w >= 680 ? 2 : 1);
+                    final tileHeight = 96.0;
+
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: filtered.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        mainAxisExtent: tileHeight,
+                        mainAxisSpacing: 10,
+                        crossAxisSpacing: 10,
+                      ),
+                      itemBuilder: (context, i) {
+                        final data = filtered[i].data();
+                        return _WorkerPaymentTile(
+                          nombre: (data['trabajadorNombre'] ?? 'N/A').toString(),
+                          rol: (data['trabajadorRol'] ?? 'Staff').toString(),
+                          pagado: data['pagado'] == true,
+                          onToggle: (val) => _updatePaymentStatus(filtered[i].id, val),
+                        );
+                      },
+                    );
+                  },
+                ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  // ===========================
+  // TAB 1: INFORMES + ANALYTICS
+  // ===========================
+  Widget _buildReportsAndAnalytics() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        children: [
+          // Bloque informes
+          _CardShell(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Informes',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: _textMain),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Genera PDFs con diseño pro. Elige evento, rango o trabajador.',
+                  style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 14),
+
+                // Row buttons responsive
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final isWide = c.maxWidth >= 860;
+                    final children = <Widget>[
+                      _ReportButton(
+                        label: 'Informe del evento (pagos)',
+                        icon: Icons.picture_as_pdf_outlined,
+                        loading: _isGenerating,
+                        onTap: _selectedEventoId == null ? null : _exportEventoPdf,
+                      ),
+                      _ReportButton(
+                        label: 'Informe de eventos (rango)',
+                        icon: Icons.event_note_outlined,
+                        loading: _isGenerating,
+                        onTap: _exportEventosPdfWithRange,
+                      ),
+                      _ReportButton(
+                        label: 'Actividad trabajador (global)',
+                        icon: Icons.person_outline,
+                        loading: _isGenerating,
+                        onTap: _exportActividadTrabajadorGlobal,
+                      ),
+                    ];
+
+                    if (isWide) {
+                      return Row(
+                        children: [
+                          Expanded(child: children[0]),
+                          const SizedBox(width: 10),
+                          Expanded(child: children[1]),
+                          const SizedBox(width: 10),
+                          Expanded(child: children[2]),
+                        ],
+                      );
+                    }
+
+                    return Column(
+                      children: [
+                        children[0],
+                        const SizedBox(height: 10),
+                        children[1],
+                        const SizedBox(height: 10),
+                        children[2],
+                      ],
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 14),
+                _buildReportSelectors(),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Dashboard rendimiento (solo si hay evento)
+          if (_selectedEventoId != null) _buildAnalyticsDashboard(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportSelectors() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Range selector
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.date_range_outlined),
+                label: Text(
+                  _range == null
+                      ? 'Elegir rango de fechas'
+                      : '${DateFormat('dd/MM/yyyy').format(_range!.start)} - ${DateFormat('dd/MM/yyyy').format(_range!.end)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _accent,
+                  side: const BorderSide(color: _border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                ),
+                onPressed: () async {
+                  final now = DateTime.now();
+                  final picked = await showDateRangePicker(
+                    context: context,
+                    firstDate: DateTime(now.year - 3, 1, 1),
+                    lastDate: DateTime(now.year + 1, 12, 31),
+                    initialDateRange: _range ??
+                        DateTimeRange(
+                          start: DateTime(now.year, now.month, 1),
+                          end: DateTime(now.year, now.month, now.day),
+                        ),
+                  );
+                  if (picked != null) setState(() => _range = picked);
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            if (_range != null)
+              IconButton(
+                tooltip: 'Limpiar rango',
+                onPressed: () => setState(() => _range = null),
+                icon: const Icon(Icons.close, color: _textSecondary),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Worker selector for global report
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _db
+              .collection('empresas')
+              .doc(_empresaId)
+              .collection('trabajadores')
+              .orderBy('nombre_lower')
+              .snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
+            final docs = snap.data!.docs;
+
+            return DropdownButtonFormField<String>(
+              value: _selectedWorkerId,
+              decoration: _inputStyle('Seleccionar trabajador (para informe global)', Icons.person_outline),
+              items: docs.map((d) {
+                final data = d.data();
+                final nombre = (data['nombre'] ?? '').toString();
+                final apellidos = (data['apellidos'] ?? '').toString();
+                final full = ('$nombre $apellidos').trim();
+                return DropdownMenuItem(value: d.id, child: Text(full.isEmpty ? d.id : full));
+              }).toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                final picked = docs.firstWhere((e) => e.id == v).data();
+                final nombre = (picked['nombre'] ?? '').toString();
+                final apellidos = (picked['apellidos'] ?? '').toString();
+                setState(() {
+                  _selectedWorkerId = v;
+                  _selectedWorkerName = ('${nombre.trim()} ${apellidos.trim()}').trim();
+                });
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAnalyticsDashboard() {
+    final stream = _db
+        .collection('empresas')
+        .doc(_empresaId)
+        .collection('eventos')
+        .doc(_selectedEventoId)
+        .collection('disponibilidad')
+        .where('asistio', isEqualTo: true)
+        .snapshots();
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snap) {
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return _HintBanner(
+            icon: Icons.bar_chart_outlined,
+            text: 'Este evento no tiene asistentes marcados como “asistió”.',
+          );
+        }
+
+        final docs = snap.data!.docs;
+        final total = docs.length;
+        final paid = docs.where((d) => d.data()['pagado'] == true).length;
+        final pending = total - paid;
+
+        // roles distribution
+        final roleCounts = <String, int>{};
+        for (final d in docs) {
+          final r = (d.data()['trabajadorRol'] ?? 'Staff').toString().trim();
+          roleCounts[r] = (roleCounts[r] ?? 0) + 1;
+        }
+        final sortedRoles = roleCounts.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+
+        // payment time series (by day, last 14)
+        final now = DateTime.now();
+        final days = List.generate(14, (i) {
+          final dt = DateTime(now.year, now.month, now.day).subtract(Duration(days: 13 - i));
+          return dt;
+        });
+
+        final paidByDay = <DateTime, int>{ for (final d in days) d: 0 };
+        for (final doc in docs) {
+          final data = doc.data();
+          if (data['pagado'] != true) continue;
+          final ts = data['pagadoEn'];
+          if (ts is Timestamp) {
+            final dt = ts.toDate();
+            final day = DateTime(dt.year, dt.month, dt.day);
+            if (paidByDay.containsKey(day)) {
+              paidByDay[day] = (paidByDay[day] ?? 0) + 1;
+            }
+          }
+        }
+
+        final seriesSpots = <FlSpot>[];
+        for (int i = 0; i < days.length; i++) {
+          final d = days[i];
+          seriesSpots.add(FlSpot(i.toDouble(), (paidByDay[d] ?? 0).toDouble()));
+        }
+
+        return Column(
+          children: [
+            _CardShell(
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final isWide = c.maxWidth >= 900;
+                  return isWide
+                      ? Row(
+                          children: [
+                            Expanded(child: _KpiTile(title: 'Asistentes', value: '$total', icon: Icons.group_outlined)),
+                            const SizedBox(width: 10),
+                            Expanded(child: _KpiTile(title: 'Pagados', value: '$paid', icon: Icons.check_circle_outline, color: _ok)),
+                            const SizedBox(width: 10),
+                            Expanded(child: _KpiTile(title: 'Pendientes', value: '$pending', icon: Icons.priority_high, color: _warn)),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _KpiTile(
+                                title: 'Tasa de pago',
+                                value: total == 0 ? '0%' : '${((paid / total) * 100).round()}%',
+                                icon: Icons.percent,
+                                color: _accent,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(child: _KpiTile(title: 'Asistentes', value: '$total', icon: Icons.group_outlined)),
+                                const SizedBox(width: 10),
+                                Expanded(child: _KpiTile(title: 'Pagados', value: '$paid', icon: Icons.check_circle_outline, color: _ok)),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(child: _KpiTile(title: 'Pendientes', value: '$pending', icon: Icons.priority_high, color: _warn)),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _KpiTile(
+                                    title: 'Tasa de pago',
+                                    value: total == 0 ? '0%' : '${((paid / total) * 100).round()}%',
+                                    icon: Icons.percent,
+                                    color: _accent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            LayoutBuilder(
+              builder: (context, c) {
+                final isWide = c.maxWidth >= 900;
+                if (isWide) {
+                  return Row(
+                    children: [
+                      Expanded(child: _buildDonutPaid(paid: paid, pending: pending)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildLinePaidSeries(seriesSpots)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildRolesBar(sortedRoles, total)),
+                    ],
+                  );
+                }
+
+                return Column(
+                  children: [
+                    _buildDonutPaid(paid: paid, pending: pending),
+                    const SizedBox(height: 12),
+                    _buildLinePaidSeries(seriesSpots),
+                    const SizedBox(height: 12),
+                    _buildRolesBar(sortedRoles, total),
+                  ],
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDonutPaid({required int paid, required int pending}) {
+    final total = paid + pending;
+    final sections = total == 0
+        ? <PieChartSectionData>[]
+        : [
+            PieChartSectionData(
+              value: paid.toDouble(),
+              title: '',
+              color: _ok,
+              radius: 26,
+            ),
+            PieChartSectionData(
+              value: pending.toDouble(),
+              title: '',
+              color: _bad,
+              radius: 26,
+            ),
+          ];
+
+    return _CardShell(
+      child: SizedBox(
+        height: 220,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Estado de pagos', style: TextStyle(fontWeight: FontWeight.w900, color: _textMain)),
+                  const SizedBox(height: 6),
+                  Text('Pagados vs pendientes', style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  _LegendDot(color: _ok, label: 'Pagados: $paid'),
+                  const SizedBox(height: 8),
+                  _LegendDot(color: _bad, label: 'Pendientes: $pending'),
+                  const SizedBox(height: 14),
+                  _MiniProgress(
+                    value: total == 0 ? 0 : (paid / total),
+                    label: total == 0 ? '0%' : '${((paid / total) * 100).round()}%',
                   ),
                 ],
               ),
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream: _eventosStream(empresaId),
-                builder: (context, snap) {
-                  if (snap.hasError) {
-                    return Text('Error cargando eventos: ${snap.error}');
-                  }
-                  if (!snap.hasData) return const LinearProgressIndicator();
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 120,
+              height: 120,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PieChart(
+                    PieChartData(
+                      centerSpaceRadius: 44,
+                      sectionsSpace: 2,
+                      sections: sections,
+                    ),
+                  ),
+                  Text(
+                    total == 0 ? '—' : '${((paid / total) * 100).round()}%',
+                    style: const TextStyle(fontWeight: FontWeight.w900, color: _textMain),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                  final docs = snap.data!.docs;
-                  if (docs.isEmpty) return const Text('No hay eventos.');
+  Widget _buildLinePaidSeries(List<FlSpot> spots) {
+    return _CardShell(
+      child: SizedBox(
+        height: 220,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Pagos recientes', style: TextStyle(fontWeight: FontWeight.w900, color: _textMain)),
+            const SizedBox(height: 6),
+            Text('Últimos 14 días', style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: LineChart(
+                LineChartData(
+                  gridData: FlGridData(show: false),
+                  titlesData: FlTitlesData(show: false),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: spots,
+                      isCurved: true,
+                      dotData: FlDotData(show: false),
+                      belowBarData: BarAreaData(show: true),
+                      barWidth: 3,
+                    ),
+                  ],
+                  minY: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                  final filtered = _eventSearch.isEmpty
-                      ? docs
-                      : docs.where((d) {
-                          final nombre = (d.data()['nombre'] ?? '')
-                              .toString()
-                              .toLowerCase();
-                          return nombre.contains(_eventSearch);
-                        }).toList();
-
-                  String? safeSelected = _selectedEventoId;
-                  final exists =
-                      safeSelected != null && filtered.any((d) => d.id == safeSelected);
-
-                  if (!exists) {
-                    safeSelected = filtered.isNotEmpty ? filtered.first.id : null;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!mounted) return;
-                      if (_selectedEventoId != safeSelected) {
-                        setState(() => _selectedEventoId = safeSelected);
-                      }
-                    });
-                  }
-
+  Widget _buildRolesBar(List<MapEntry<String, int>> roles, int total) {
+    final top = roles.take(5).toList();
+    return _CardShell(
+      child: SizedBox(
+        height: 220,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Distribución de roles', style: TextStyle(fontWeight: FontWeight.w900, color: _textMain)),
+            const SizedBox(height: 6),
+            Text('Top 5 roles del evento', style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView.separated(
+                itemCount: top.length,
+                physics: const NeverScrollableScrollPhysics(),
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, i) {
+                  final e = top[i];
+                  final v = total == 0 ? 0 : (e.value / total);
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Evento',
-                        style: TextStyle(
-                          color: _textDark,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-
-                      TextField(
-                        controller: _eventSearchCtrl,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          hintText: 'Buscar evento por nombre...',
-                          prefixIcon: const Icon(Icons.search, size: 18),
-                          filled: true,
-                          fillColor: const Color(0xFFF9FAFB),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: _border),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: _border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(color: _blue, width: 2),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 12,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      DropdownButtonFormField<String>(
-                        value: safeSelected,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          labelText: 'Selecciona un evento',
-                          labelStyle: const TextStyle(color: _textGrey),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        items: filtered.map((d) {
-                          final data = d.data();
-                          final nombre = (data['nombre'] ?? 'Evento') as String;
-                          return DropdownMenuItem(
-                            value: d.id,
+                      Row(
+                        children: [
+                          Expanded(
                             child: Text(
-                              nombre,
+                              e.key,
+                              maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w700),
+                              style: const TextStyle(fontWeight: FontWeight.w800, color: _textMain),
                             ),
-                          );
-                        }).toList(),
-                        onChanged: (v) => setState(() => _selectedEventoId = v),
-                      ),
-
-                      if (_eventSearch.isNotEmpty && filtered.isEmpty) ...[
-                        const SizedBox(height: 10),
-                        const Text(
-                          'No hay eventos que coincidan con la búsqueda.',
-                          style: TextStyle(
-                            color: _textGrey,
-                            fontWeight: FontWeight.w600,
                           ),
-                        ),
-                      ],
+                          Text('${e.value}', style: const TextStyle(fontWeight: FontWeight.w900, color: _textSecondary)),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      LinearProgressIndicator(
+                        value: (v).toDouble(),
+                        minHeight: 8,
+                        backgroundColor: const Color(0xFFEFF6FF),
+                        valueColor: const AlwaysStoppedAnimation(_accent),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
                     ],
                   );
                 },
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
 
-            const SizedBox(height: 14),
+  // ===========================
+  // ACTIONS
+  // ===========================
+  Future<void> _updatePaymentStatus(String docId, bool status) async {
+    if (_empresaId == null || _selectedEventoId == null) return;
 
-            // ============================
-            // ✅ CARD INFORMES con filtros
-            // ============================
-            if (_selectedEventoId != null) ...[
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: _card,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: _border),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x14000000),
-                      blurRadius: 24,
-                      offset: Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Informes',
-                      style: TextStyle(
-                        color: _textDark,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+    await _db
+        .collection('empresas')
+        .doc(_empresaId)
+        .collection('eventos')
+        .doc(_selectedEventoId)
+        .collection('disponibilidad')
+        .doc(docId)
+        .update({
+      'pagado': status,
+      'pagadoEn': status ? FieldValue.serverTimestamp() : null,
+    });
+  }
 
-                    // ✅ Filtro de fechas para informe de eventos
-                    Row(
-                      children: [
-                        const Text(
-                          'Eventos:',
-                          style: TextStyle(
-                            color: _textGrey,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF9FAFB),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: _border),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.date_range, size: 18, color: _textGrey),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    _rangeLabel(),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: _textDark,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        PopupMenuButton<String>(
-                          tooltip: 'Filtrar',
-                          onSelected: (v) async {
-                            if (v == 'todos') setState(() => _eventsRange = null);
-                            if (v == 'semana') setState(() => _eventsRange = _thisWeekRange());
-                            if (v == 'mes') setState(() => _eventsRange = _thisMonthRange());
-                            if (v == '30') setState(() => _eventsRange = _last30DaysRange());
-                            if (v == 'custom') await _pickCustomRange();
-                          },
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(value: 'todos', child: Text('Todos')),
-                            PopupMenuItem(value: 'semana', child: Text('Esta semana')),
-                            PopupMenuItem(value: 'mes', child: Text('Este mes')),
-                            PopupMenuItem(value: '30', child: Text('Últimos 30 días')),
-                            PopupMenuItem(value: 'custom', child: Text('Rango personalizado')),
-                          ],
-                          child: Container(
-                            height: 44,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: _border),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.tune, size: 18, color: _blue),
-                                SizedBox(width: 8),
-                                Text('Filtro', style: TextStyle(fontWeight: FontWeight.w800)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+  Future<void> _exportEventoPdf() async {
+    if (_empresaId == null || _selectedEventoId == null) return;
 
-                    const SizedBox(height: 12),
+    setState(() => _isGenerating = true);
+    try {
+      final bytes = await AdminReports.buildDisponibilidadYAsignaciones(
+        db: _db,
+        empresaId: _empresaId!,
+        eventoId: _selectedEventoId!,
+      );
+      await Printing.layoutPdf(onLayout: (_) => bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
 
-                    // ✅ Selector de trabajador para actividad global
-                    StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: _db
-                          .collection('empresas')
-                          .doc(empresaId)
-                          .collection('trabajadores')
-                          .orderBy('nombre', descending: false)
-                          .snapshots(),
-                      builder: (context, snapW) {
-                        if (!snapW.hasData) {
-                          return const LinearProgressIndicator();
-                        }
+  Future<void> _exportEventosPdfWithRange() async {
+    if (_empresaId == null) return;
 
-                        final wdocs = snapW.data!.docs;
-                        if (wdocs.isEmpty) {
-                          return const Text(
-                            'No hay trabajadores.',
-                            style: TextStyle(
-                              color: _textGrey,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          );
-                        }
+    setState(() => _isGenerating = true);
+    try {
+      final bytes = await AdminReports.buildInformeEventos(
+        db: _db,
+        empresaId: _empresaId!,
+        range: _range,
+      );
+      await Printing.layoutPdf(onLayout: (_) => bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
 
-                        // Mantener selección válida
-                        final exists = _selectedWorkerId != null &&
-                            wdocs.any((d) => d.id == _selectedWorkerId);
+  Future<void> _exportActividadTrabajadorGlobal() async {
+    if (_empresaId == null) return;
 
-                        if (!exists) {
-                          final first = wdocs.first;
-                          final data = first.data();
-                          final name = (data['nombre'] ??
-                                  data['fullName'] ??
-                                  data['email'] ??
-                                  'Trabajador')
-                              .toString();
+    if (_selectedWorkerId == null || (_selectedWorkerName ?? '').trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona un trabajador primero.')),
+      );
+      return;
+    }
 
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (!mounted) return;
-                            setState(() {
-                              _selectedWorkerId = first.id;
-                              _selectedWorkerName = name;
-                            });
-                          });
-                        }
+    setState(() => _isGenerating = true);
+    try {
+      final bytes = await AdminReports.buildActividadTrabajadorGlobal(
+        db: _db,
+        empresaId: _empresaId!,
+        trabajadorId: _selectedWorkerId!,
+        trabajadorNombre: _selectedWorkerName!,
+      );
+      await Printing.layoutPdf(onLayout: (_) => bytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
 
-                        return DropdownButtonFormField<String>(
-                          value: _selectedWorkerId,
-                          decoration: InputDecoration(
-                            isDense: true,
-                            labelText: 'Trabajador (para actividad)',
-                            labelStyle: const TextStyle(color: _textGrey),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          items: wdocs.map((d) {
-                            final data = d.data();
-                            final name = (data['nombre'] ??
-                                    data['fullName'] ??
-                                    data['email'] ??
-                                    'Trabajador')
-                                .toString();
-                            return DropdownMenuItem(
-                              value: d.id,
-                              child: Text(
-                                name,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontWeight: FontWeight.w700),
-                              ),
-                            );
-                          }).toList(),
-                          onChanged: (v) {
-                            if (v == null) return;
-                            final doc = wdocs.firstWhere((e) => e.id == v);
-                            final data = doc.data();
-                            final name = (data['nombre'] ??
-                                    data['fullName'] ??
-                                    data['email'] ??
-                                    'Trabajador')
-                                .toString();
-                            setState(() {
-                              _selectedWorkerId = v;
-                              _selectedWorkerName = name;
-                            });
-                          },
-                        );
-                      },
-                    ),
+  // ===========================
+  // UI HELPERS
+  // ===========================
+  InputDecoration _inputStyle(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, color: _accent),
+      filled: true,
+      fillColor: Colors.white,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _border),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: const BorderSide(color: _accent, width: 2),
+      ),
+    );
+  }
+}
 
-                    const SizedBox(height: 12),
+// ===========================
+// WIDGETS
+// ===========================
 
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        _ReportButton(
-                          loading: _generatingPdf,
-                          icon: Icons.assignment_turned_in_outlined,
-                          label: 'Disponibilidad',
-                          onTap: () async {
-                            final eventoId = _selectedEventoId!;
-                            final file = 'informe_disponibilidad_$eventoId.pdf';
+class _CardShell extends StatelessWidget {
+  final Widget child;
+  const _CardShell({required this.child});
 
-                            await _downloadPdf(
-                              filename: file,
-                              buildBytes: () => AdminReports.buildDisponibilidadYAsignaciones(
-                                db: _db,
-                                empresaId: empresaId,
-                                eventoId: eventoId,
-                              ),
-                            );
-                          },
-                        ),
-                        _ReportButton(
-                          loading: _generatingPdf,
-                          icon: Icons.event_note_outlined,
-                          label: 'Eventos',
-                          onTap: () async {
-                            final file = 'informe_eventos_$empresaId.pdf';
+  static const Color _border = Color(0xFFE5E7EB);
 
-                            await _downloadPdf(
-                              filename: file,
-                              buildBytes: () => AdminReports.buildInformeEventos(
-                                db: _db,
-                                empresaId: empresaId,
-                                range: _eventsRange,
-                              ),
-                            );
-                          },
-                        ),
-                        _ReportButton(
-                          loading: _generatingPdf,
-                          icon: Icons.person_outline,
-                          label: 'Actividad',
-                          onTap: () async {
-                            final workerId = _selectedWorkerId;
-                            final workerName = _selectedWorkerName;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x14000000),
+            blurRadius: 22,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
 
-                            if (workerId == null || workerName == null || workerName.isEmpty) {
-                              if (!mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Selecciona un trabajador.')),
-                              );
-                              return;
-                            }
+class _TabChip extends StatelessWidget {
+  final bool selected;
+  final String label;
+  final IconData icon;
+  final bool compact;
+  final VoidCallback onTap;
 
-                            final safeName = workerName.replaceAll(
-                              RegExp(r'[^a-zA-Z0-9_-]+'),
-                              '_',
-                            );
-                            final file = 'actividad_${safeName}.pdf';
+  const _TabChip({
+    required this.selected,
+    required this.label,
+    required this.icon,
+    required this.compact,
+    required this.onTap,
+  });
 
-                            await _downloadPdf(
-                              filename: file,
-                              buildBytes: () => AdminReports.buildActividadTrabajadorGlobal(
-                                db: _db,
-                                empresaId: empresaId,
-                                trabajadorId: workerId,
-                                trabajadorNombre: workerName,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
+  static const Color _accent = Color(0xFF2563EB);
+  static const Color _textMain = Color(0xFF0F172A);
+  static const Color _border = Color(0xFFE5E7EB);
 
-                    if (_generatingPdf) ...[
-                      const SizedBox(height: 12),
-                      const LinearProgressIndicator(),
-                    ],
-                  ],
-                ),
+  @override
+  Widget build(BuildContext context) {
+    final bg = selected ? const Color(0xFFEFF6FF) : Colors.white;
+    final br = selected ? Colors.transparent : _border;
+    final ic = selected ? _accent : const Color(0xFF64748B);
+    final tx = selected ? _textMain : const Color(0xFF64748B);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 10 : 12),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: br),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: ic),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: tx, fontWeight: FontWeight.w900, fontSize: 12),
               ),
-              const SizedBox(height: 14),
-            ],
-
-            // ====== GRID ASISTENTES ======
-            Expanded(
-              child: (_selectedEventoId == null)
-                  ? const Center(
-                      child: Text(
-                        'Selecciona un evento.',
-                        style: TextStyle(
-                          color: _textGrey,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    )
-                  : StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: _asistidosStream(
-                        empresaId: empresaId,
-                        eventoId: _selectedEventoId!,
-                      ),
-                      builder: (context, snap) {
-                        if (snap.hasError) {
-                          return Center(
-                            child: Text('Error cargando asistentes: ${snap.error}'),
-                          );
-                        }
-                        if (!snap.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-
-                        final docs = snap.data!.docs;
-                        if (docs.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'No hay trabajadores seleccionados con asistencia para este evento',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                color: _textGrey,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          );
-                        }
-
-                        return LayoutBuilder(
-                          builder: (context, c) {
-                            final w = c.maxWidth;
-
-                            int cols = 1;
-                            if (w >= 1100) cols = 4;
-                            else if (w >= 850) cols = 3;
-                            else if (w >= 600) cols = 2;
-
-                            return GridView.builder(
-                              padding: const EdgeInsets.only(top: 2),
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: cols,
-                                crossAxisSpacing: 12,
-                                mainAxisSpacing: 12,
-                                childAspectRatio: cols == 1 ? 3.1 : 2.6,
-                              ),
-                              itemCount: docs.length,
-                              itemBuilder: (context, i) {
-                                final doc = docs[i];
-                                final data = doc.data();
-
-                                final nombre =
-                                    (data['trabajadorNombre'] ?? 'Trabajador') as String;
-                                final rol = (data['trabajadorRol'] ?? '') as String;
-                                final pagado = data['pagado'] == true;
-
-                                return _PaymentWorkerCard(
-                                  nombre: nombre,
-                                  rol: rol,
-                                  pagado: pagado,
-                                  onChanged: (v) async {
-                                    await _setPagado(
-                                      empresaId: empresaId,
-                                      eventoId: _selectedEventoId!,
-                                      disponibilidadId: doc.id,
-                                      pagado: v,
-                                    );
-                                  },
-                                );
-                              },
-                            );
-                          },
-                        );
-                      },
-                    ),
             ),
           ],
         ),
@@ -837,119 +1065,86 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   }
 }
 
-class _PaymentWorkerCard extends StatelessWidget {
-  static const Color _card = Colors.white;
+class _HintBanner extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _HintBanner({required this.icon, required this.text});
+
   static const Color _border = Color(0xFFE5E7EB);
-  static const Color _textDark = Color(0xFF111827);
-  static const Color _textGrey = Color(0xFF6B7280);
-
-  final String nombre;
-  final String rol;
-  final bool pagado;
-  final ValueChanged<bool> onChanged;
-
-  const _PaymentWorkerCard({
-    required this.nombre,
-    required this.rol,
-    required this.pagado,
-    required this.onChanged,
-  });
+  static const Color _textSecondary = Color(0xFF64748B);
 
   @override
   Widget build(BuildContext context) {
-    final initials = _initials(nombre);
-
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(top: 8),
       decoration: BoxDecoration(
-        color: _card,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: _border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 16,
-            offset: Offset(0, 8),
-          ),
-        ],
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: const Color(0xFFEFF6FF),
+          Icon(icon, color: _textSecondary),
+          const SizedBox(width: 10),
+          Expanded(
             child: Text(
-              initials,
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                color: _textDark,
-              ),
+              text,
+              style: const TextStyle(color: _textSecondary, fontWeight: FontWeight.w700),
             ),
           ),
-          const SizedBox(width: 12),
+        ],
+      ),
+    );
+  }
+}
+
+class _KpiTile extends StatelessWidget {
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color? color;
+
+  const _KpiTile({
+    required this.title,
+    required this.value,
+    required this.icon,
+    this.color,
+  });
+
+  static const Color _textMain = Color(0xFF0F172A);
+  static const Color _textSecondary = Color(0xFF64748B);
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? const Color(0xFF2563EB);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: c.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: c, size: 18),
+          ),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  nombre,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: _textDark,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (rol.isNotEmpty)
-                  Text(
-                    rol,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _textGrey,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
-                  ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    _PaidChip(pagado: pagado),
-                    const Spacer(),
-                    SizedBox(
-                      width: 140,
-                      child: DropdownButtonFormField<bool>(
-                        value: pagado,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 10,
-                          ),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: false,
-                            child: Text('No pagado'),
-                          ),
-                          DropdownMenuItem(
-                            value: true,
-                            child: Text('Pagado'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          onChanged(v);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
+                Text(title, style: const TextStyle(color: _textSecondary, fontWeight: FontWeight.w700, fontSize: 12)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(color: _textMain, fontWeight: FontWeight.w900, fontSize: 16)),
               ],
             ),
           ),
@@ -957,86 +1152,161 @@ class _PaymentWorkerCard extends StatelessWidget {
       ),
     );
   }
-
-  static String _initials(String nombreCompleto) {
-    final parts = nombreCompleto.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '?';
-    final first = parts.first.isNotEmpty ? parts.first[0].toUpperCase() : '';
-    final second =
-        parts.length > 1 && parts[1].isNotEmpty ? parts[1][0].toUpperCase() : '';
-    final res = (first + second).trim();
-    return res.isEmpty ? '?' : res;
-  }
 }
 
-class _PaidChip extends StatelessWidget {
-  final bool pagado;
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
 
-  const _PaidChip({required this.pagado});
+  static const Color _textMain = Color(0xFF0F172A);
 
   @override
   Widget build(BuildContext context) {
-    final bg = pagado ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2);
-    final fg = pagado ? const Color(0xFF15803D) : const Color(0xFFB91C1C);
-    final text = pagado ? 'Pagado' : 'No pagado';
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: fg,
+    return Row(
+      children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(color: _textMain, fontWeight: FontWeight.w800),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
+      ],
+    );
+  }
+}
+
+class _MiniProgress extends StatelessWidget {
+  final double value;
+  final String label;
+  const _MiniProgress({required this.value, required this.label});
+
+  static const Color _accent = Color(0xFF2563EB);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: LinearProgressIndicator(
+            value: value.clamp(0, 1),
+            minHeight: 8,
+            backgroundColor: const Color(0xFFEFF6FF),
+            valueColor: const AlwaysStoppedAnimation(_accent),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+      ],
+    );
+  }
+}
+
+class _WorkerPaymentTile extends StatelessWidget {
+  final String nombre;
+  final String rol;
+  final bool pagado;
+  final Function(bool) onToggle;
+
+  const _WorkerPaymentTile({
+    required this.nombre,
+    required this.rol,
+    required this.pagado,
+    required this.onToggle,
+  });
+
+  static const Color _textMain = Color(0xFF0F172A);
+  static const Color _textSecondary = Color(0xFF64748B);
+  static const Color _ok = Color(0xFF10B981);
+  static const Color _warn = Color(0xFFF59E0B);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: pagado ? _ok.withOpacity(0.35) : const Color(0xFFE5E7EB)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: pagado ? _ok.withOpacity(0.12) : _warn.withOpacity(0.12),
+            child: Icon(pagado ? Icons.check : Icons.priority_high, color: pagado ? _ok : _warn, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nombre,
+                  style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: _textMain),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  rol,
+                  style: const TextStyle(color: _textSecondary, fontWeight: FontWeight.w700, fontSize: 11),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Switch.adaptive(
+            value: pagado,
+            activeColor: _ok,
+            onChanged: onToggle,
+          ),
+        ],
       ),
     );
   }
 }
 
-// ============================
-// ✅ BOTÓN REUTILIZABLE DE INFORME
-// ============================
 class _ReportButton extends StatelessWidget {
-  final bool loading;
-  final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final IconData icon;
+  final bool loading;
+  final VoidCallback? onTap;
 
   const _ReportButton({
-    required this.loading,
-    required this.icon,
     required this.label,
+    required this.icon,
+    required this.loading,
     required this.onTap,
   });
 
+  static const Color _accent = Color(0xFF2563EB);
+
   @override
   Widget build(BuildContext context) {
-    const border = Color(0xFFE5E7EB);
-    const blue = Color(0xFF2563EB);
-    const textDark = Color(0xFF111827);
+    final disabled = onTap == null || loading;
 
-    return SizedBox(
-      height: 44,
-      child: OutlinedButton.icon(
-        onPressed: loading ? null : onTap,
-        icon: Icon(icon, size: 18, color: loading ? Colors.grey : blue),
-        label: Text(
-          label,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: loading ? Colors.grey : textDark,
-          ),
-        ),
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: border),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          backgroundColor: Colors.white,
-        ),
+    return ElevatedButton.icon(
+      onPressed: disabled ? null : onTap,
+      icon: loading
+          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          : Icon(icon, size: 18),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _accent,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: _accent.withOpacity(0.35),
+        disabledForegroundColor: Colors.white,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }

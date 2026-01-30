@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../config/app_config.dart';
 import '../../core/services/firestore_service.dart';
@@ -370,10 +371,75 @@ class _SolicitudCard extends StatelessWidget {
 
   const _SolicitudCard({required this.solicitud, required this.empresaId});
 
+  Future<Map<String, dynamic>?> _fetchEventoData() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('empresas')
+          .doc(empresaId)
+          .collection('eventos')
+          .doc(solicitud.eventoId)
+          .get();
+
+      if (!doc.exists) return null;
+      return doc.data();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  DateTime? _asDate(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    return null;
+  }
+
+String _pickUbicacion(Map<String, dynamic> data) {
+  // 1. Accedemos al mapa 'ubicacion'
+  final dynamic ubicacionData = data['ubicacion'];
+  
+  if (ubicacionData == null || ubicacionData is! Map) return 'Ubicación no especificada';
+  
+  // 2. Extraemos los campos usando las mayúsculas exactas de tu Firebase
+  // Según tu captura, los campos son 'Dirección' y 'Ciudad'
+  final String direccion = ubicacionData['Dirección']?.toString() ?? ''; 
+  final String ciudad = ubicacionData['Ciudad']?.toString() ?? '';
+  
+  // 3. Priorizamos mostrar la dirección completa si existe
+  if (direccion.isNotEmpty) {
+    return direccion;
+  }
+  
+  // 4. Si no hay dirección pero sí ciudad, mostramos la ciudad
+  if (ciudad.isNotEmpty) {
+    return ciudad;
+  }
+  
+  return 'Ubicación disponible en el mapa';
+}
+
+
+
+  Widget _infoRow({required IconData icon, required String text}) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: _textGrey),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(color: _textGrey, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = solicitud;
     final bool esPendiente = s.estado == 'pendiente';
+    final df = DateFormat('dd/MM/yyyy HH:mm');
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -433,6 +499,68 @@ class _SolicitudCard extends StatelessWidget {
             ),
           ),
 
+          // ✅ NUEVO: FECHA/HORA + UBICACIÓN del evento (cargado por eventoId)
+          const SizedBox(height: 10),
+          FutureBuilder<Map<String, dynamic>?>(
+  future: _fetchEventoData(),
+  builder: (context, snap) {
+    if (snap.connectionState == ConnectionState.waiting) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _soft,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _border),
+        ),
+        child: const Text(
+          'Cargando detalles del evento…',
+          style: TextStyle(color: _textGrey, fontWeight: FontWeight.w700),
+        ),
+      );
+    }
+
+    final data = snap.data;
+    if (data == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Extraer la ubicación
+    final ubi = _pickUbicacion(data);
+    print("Ubicación extraída: $ubi"); // Verificar si la ubicación está bien extraída
+
+    // Procesar la fecha de inicio y fin
+    final inicio = _asDate(data['fechaInicio']);
+    final fin = _asDate(data['fechaFin']);
+    
+    // Formatear la fecha
+    final fechaTexto = (inicio != null && fin != null && fin.isAfter(inicio)) 
+        ? '${df.format(inicio)} → ${df.format(fin)}' 
+        : (inicio != null ? df.format(inicio) : '');
+
+    if (fechaTexto.isEmpty && ubi.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _soft,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (fechaTexto.isNotEmpty)
+            _infoRow(icon: Icons.schedule_rounded, text: fechaTexto),
+          if (fechaTexto.isNotEmpty && ubi.isNotEmpty) const SizedBox(height: 8),
+          if (ubi.isNotEmpty)
+            _infoRow(icon: Icons.place_outlined, text: ubi),
+        ],
+      ),
+    );
+  },
+),
           const SizedBox(height: 12),
 
           if (esPendiente)
@@ -469,7 +597,10 @@ class _SolicitudCard extends StatelessWidget {
                     ),
                     child: const Text(
                       'Aceptar',
-                      style: TextStyle(fontWeight: FontWeight.w900),
+                      style: TextStyle(
+        fontWeight: FontWeight.w900,
+        color: Color.fromARGB(255, 255, 255, 254), 
+      ),
                     ),
                   ),
                 ),
@@ -518,6 +649,7 @@ class _SolicitudCard extends StatelessWidget {
     }
   }
 }
+
 
 // ============================
 // Card: Notificación general
