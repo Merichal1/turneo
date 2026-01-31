@@ -36,6 +36,7 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
   DateTime _focusedDay = DateTime.now();
   DateTime _selectedDay = DateTime.now();
   bool _verTodos = false;
+  String _searchQuery = ""; // <--- AÑADIR ESTA LÍNEA
 
   @override
   Widget build(BuildContext context) {
@@ -78,7 +79,7 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
               child: Row(
                 children: [
                   Text(
-                    _verTodos ? "Historial" : "Próximos",
+                    _verTodos ? "Historial" : "Historial",
                     style: const TextStyle(
                       color: _textGrey,
                       fontSize: 12,
@@ -115,18 +116,28 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          List<Evento> todosLosEventos = snapshot.data!;
-          List<Evento> filtrados = _verTodos
-              ? (List.from(todosLosEventos)
-                ..sort((a, b) => b.fechaInicio.compareTo(a.fechaInicio)))
-              : todosLosEventos
-                  .where((e) => e.fechaInicio.isAfter(
-                      DateTime.now().subtract(const Duration(days: 1))))
-                  .toList();
+      List<Evento> todosLosEventos = snapshot.data!;
 
-          final eventosDelDia = filtrados
-              .where((e) => isSameDay(e.fechaInicio, _selectedDay))
+      // 1. Primero aplicamos el filtro de fecha (Historial o Hoy)
+      List<Evento> filtrados = _verTodos
+          ? (List.from(todosLosEventos)
+            ..sort((a, b) => b.fechaInicio.compareTo(a.fechaInicio)))
+          : todosLosEventos
+              .where((e) => e.fechaInicio.isAfter(
+                  DateTime.now().subtract(const Duration(days: 1))))
               .toList();
+
+      // 2. Aplicamos el filtro de búsqueda por nombre si hay texto escrito
+      if (_searchQuery.isNotEmpty) {
+        filtrados = filtrados
+            .where((e) => e.nombre.toLowerCase().contains(_searchQuery.toLowerCase()))
+            .toList();
+      }
+
+      // Eventos para marcar el calendario
+      final eventosDelDia = filtrados
+          .where((e) => isSameDay(e.fechaInicio, _selectedDay))
+          .toList();
 
           return Flex(
             direction: isWideScreen ? Axis.horizontal : Axis.vertical,
@@ -293,6 +304,24 @@ class _AdminEventScreenState extends State<AdminEventScreen> {
               ),
             ),
           ),
+          if (_verTodos)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: TextField(
+                onChanged: (value) => setState(() => _searchQuery = value),
+                decoration: InputDecoration(
+                  hintText: "Buscar evento por nombre...",
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  filled: true,
+                  fillColor: _bg,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 0),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
           const Divider(height: 1),
           Expanded(
             child: listaAMostrar.isEmpty

@@ -20,17 +20,32 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
 
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  bool _signingOut = false;
+
+  Future<void> _signOut({BuildContext? closeDrawerContext}) async {
+    if (_signingOut) return;
+    setState(() => _signingOut = true);
+
+    try {
+      // Cierra el drawer si estamos en modo móvil
+      if (closeDrawerContext != null) {
+        Navigator.of(closeDrawerContext).pop();
+      }
+      // AuthGate se encargará de mostrar Login cuando no haya user
+      await FirebaseAuth.instance.signOut();
+    } finally {
+      if (mounted) setState(() => _signingOut = false);
+    }
+  }
+
   // ✅ Mantiene estado de cada pantalla
   late final List<Widget> _pages = [
-    const AdminHomeScreen(),               // 0 – Dashboard
-    const AdminEventsScreen(),             // 1 – Eventos
-
-    // 👇 CLAVE: quito const aquí para evitar "Not a constant expression"
-    AdminWorkersScreen(),                  // 2 – Trabajadores
-
-    const AdminNotificacionesScreen(),     // 3 – Notificaciones
-    const AdminChatScreen(),               // 4 – Chat
-    const AdminPaymentsHistoryScreen(),    // 5 – Gestión
+    const AdminHomeScreen(), // 0 – Dashboard
+    const AdminEventsScreen(), // 1 – Eventos
+    AdminWorkersScreen(), // 2 – Trabajadores (sin const)
+    const AdminNotificacionesScreen(), // 3 – Notificaciones
+    const AdminChatScreen(), // 4 – Chat
+    const AdminPaymentsHistoryScreen(), // 5 – Gestión
   ];
 
   // 🎨 Estilo Turneo
@@ -40,43 +55,21 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   static const Color _border = Color(0xFFE5E7EB);
   static const Color _blue = Color(0xFF2563EB);
 
-  bool _redirecting = false;
-
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
+    // Obtenemos el usuario actual (si usas AuthGate, aquí debería existir)
+    final user = FirebaseAuth.instance.currentUser;
 
-        final user = snap.data;
+    // Seguridad extra: si por lo que sea es null, no rompemos nada
+    if (user == null) return const SizedBox.shrink();
 
-        if (user == null) {
-          if (!_redirecting) {
-            _redirecting = true;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              Navigator.of(context).pushNamedAndRemoveUntil('/welcome', (_) => false);
-            });
-          }
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= 900;
+        final isCompact = constraints.maxWidth < 600;
 
-        _redirecting = false;
-
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 900;
-            final isCompact = constraints.maxWidth < 600;
-
-            if (isWide) return _buildWideScaffold(context, user);
-            return _buildNarrowScaffold(context, user, isCompact: isCompact);
-          },
-        );
+        if (isWide) return _buildWideScaffold(context, user);
+        return _buildNarrowScaffold(context, user, isCompact: isCompact);
       },
     );
   }
@@ -202,10 +195,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                   side: const BorderSide(color: _border),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: () async {
-                  Navigator.of(context).pop();
-                  await FirebaseAuth.instance.signOut();
-                },
+                onPressed: _signingOut ? null : () => _signOut(closeDrawerContext: context),
               ),
             ),
 
@@ -239,7 +229,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
         selectedTileColor: const Color(0xFFEFF6FF),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         onTap: () {
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(); // cerrar drawer
           _onItemTap(index);
         },
       ),
@@ -324,9 +314,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                     side: const BorderSide(color: _border),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () async {
-                    await FirebaseAuth.instance.signOut();
-                  },
+                  onPressed: _signingOut ? null : () => _signOut(),
                 ),
               ),
             ),

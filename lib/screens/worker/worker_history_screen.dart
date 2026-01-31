@@ -139,10 +139,8 @@ class _WorkerHistoryScreenState extends State<WorkerHistoryScreen> {
                         child: Row(
                           children: [
                             _filter('Todos'),
-                            _filter('Próximos'),
                             _filter('Completados'),
                             _filter('Rechazados'),
-                            _filter('Cancelados'),
                           ],
                         ),
                       ),

@@ -30,6 +30,11 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   static const Color _warn = Color(0xFFF59E0B);
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  // Dentro de la clase _AdminPaymentsHistoryScreenState
+  final TextEditingController _eventoSearchCtrl = TextEditingController(); // Para el buscador de eventos
+  String _eventoSearchTerm = ''; // El término de búsqueda del evento
+
+  String _workerSearchTerm = ''; // Para filtrar el buscador de trabajadores
 
   // UI state
   final TextEditingController _searchCtrl = TextEditingController();
@@ -62,7 +67,64 @@ void initState() {
   });
 }
 
+void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder( // Necesario para que el buscador funcione dentro del dialog
+        builder: (context, setDialogState) {
+          // Filtramos la lista según lo que escriba el usuario
+          final filteredDocs = allDocs.where((doc) {
+            final name = (doc.data()['nombre'] ?? '').toString().toLowerCase();
+            return name.contains(_eventoSearchTerm.toLowerCase());
+          }).toList();
 
+          return AlertDialog(
+            title: const Text("Buscar Evento", style: TextStyle(fontWeight: FontWeight.w900)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    decoration: _inputStyle('Nombre del evento...', Icons.search),
+                    onChanged: (value) {
+                      setDialogState(() => _eventoSearchTerm = value);
+                    },
+                  ),
+                  const SizedBox(height: 15),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: filteredDocs.length,
+                      itemBuilder: (context, i) {
+                        final data = filteredDocs[i].data();
+                        return ListTile(
+                          title: Text(data['nombre'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(DateFormat('dd/MM/yyyy').format((data['fechaInicio'] as Timestamp).toDate())),
+                          onTap: () {
+                            setState(() {
+                              _selectedEventoId = filteredDocs[i].id;
+                              _selectedEventoData = data;
+                              _eventoSearchTerm = ''; // Limpiamos para la próxima vez
+                            });
+                            Navigator.pop(context);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -172,43 +234,46 @@ void initState() {
       ),
     );
   }
-
   Widget _buildEventoSelector() {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _db
-          .collection('empresas')
-          .doc(_empresaId)
-          .collection('eventos')
-          .orderBy('fechaInicio', descending: true)
-          .snapshots(),
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const LinearProgressIndicator(minHeight: 2);
-        }
+  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+    stream: _db
+        .collection('empresas')
+        .doc(_empresaId)
+        .collection('eventos')
+        .orderBy('fechaInicio', descending: true)
+        .snapshots(),
+    builder: (context, snap) {
+      if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
 
-        final docs = snap.data!.docs;
+      final docs = snap.data!.docs;
+      // Buscamos el nombre del evento seleccionado para mostrarlo en el campo
+      final selectedEventName = _selectedEventoData?['nombre'] ?? 'Seleccionar evento';
 
-        return DropdownButtonFormField<String>(
-          value: _selectedEventoId,
-          decoration: _inputStyle('Seleccionar evento', Icons.event_outlined),
-          items: docs.map((d) {
-            final data = d.data();
-            final name = (data['nombre'] ?? 'Evento').toString();
-            return DropdownMenuItem(value: d.id, child: Text(name, overflow: TextOverflow.ellipsis));
-          }).toList(),
-          onChanged: (v) {
-            if (v == null) return;
-            final picked = docs.firstWhere((e) => e.id == v).data();
-            setState(() {
-              _selectedEventoId = v;
-              _selectedEventoData = picked;
-            });
-          },
-        );
-      },
-    );
-  }
-
+      return InkWell(
+        onTap: () => _showEventoSearchDialog(context, docs),
+        child: InputDecorator(
+          decoration: _inputStyle('Evento', Icons.event_outlined),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  selectedEventName,
+                  style: TextStyle(
+                    color: _selectedEventoId == null ? _textSecondary : _textMain,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, color: _textSecondary),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
   Widget _buildTabs() {
     return LayoutBuilder(
       builder: (context, c) {
@@ -517,40 +582,47 @@ void initState() {
         const SizedBox(height: 10),
 
         // Worker selector for global report
-        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: _db
-              .collection('empresas')
-              .doc(_empresaId)
-              .collection('trabajadores')
-              .orderBy('nombre_lower')
-              .snapshots(),
-          builder: (context, snap) {
-            if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
-            final docs = snap.data!.docs;
+        // Worker selector for global report filtrable
+StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+  stream: _db
+      .collection('empresas')
+      .doc(_empresaId)
+      .collection('trabajadores')
+      .orderBy('nombre_lower')
+      .snapshots(),
+  builder: (context, snap) {
+    if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
+    final docs = snap.data!.docs;
 
-            return DropdownButtonFormField<String>(
-              value: _selectedWorkerId,
-              decoration: _inputStyle('Seleccionar trabajador (para informe global)', Icons.person_outline),
-              items: docs.map((d) {
-                final data = d.data();
-                final nombre = (data['nombre'] ?? '').toString();
-                final apellidos = (data['apellidos'] ?? '').toString();
-                final full = ('$nombre $apellidos').trim();
-                return DropdownMenuItem(value: d.id, child: Text(full.isEmpty ? d.id : full));
-              }).toList(),
-              onChanged: (v) {
-                if (v == null) return;
-                final picked = docs.firstWhere((e) => e.id == v).data();
-                final nombre = (picked['nombre'] ?? '').toString();
-                final apellidos = (picked['apellidos'] ?? '').toString();
-                setState(() {
-                  _selectedWorkerId = v;
-                  _selectedWorkerName = ('${nombre.trim()} ${apellidos.trim()}').trim();
-                });
-              },
-            );
-          },
+    // Texto a mostrar en el campo
+    final displayText = (_selectedWorkerName != null && _selectedWorkerName!.isNotEmpty)
+        ? _selectedWorkerName!
+        : 'Seleccionar trabajador (para informe global)';
+
+    return InkWell(
+      onTap: () => _showWorkerSearchDialog(context, docs),
+      child: InputDecorator(
+        decoration: _inputStyle('Trabajador', Icons.person_outline),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                displayText,
+                style: TextStyle(
+                  color: _selectedWorkerId == null ? _textSecondary : _textMain,
+                  fontWeight: FontWeight.w600,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Icon(Icons.arrow_drop_down, color: _textSecondary),
+          ],
         ),
+      ),
+    );
+  },
+),
       ],
     );
   }
@@ -883,7 +955,86 @@ void initState() {
       'pagadoEn': status ? FieldValue.serverTimestamp() : null,
     });
   }
+void _showWorkerSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          // 1. Filtramos primero para quitar los que no tienen nombre 
+          // 2. Filtramos por el término de búsqueda
+          final filteredDocs = allDocs.where((doc) {
+            final data = doc.data();
+            final nombre = (data['nombre'] ?? '').toString().trim();
+            final apellidos = (data['apellidos'] ?? '').toString().trim();
+            final full = '$nombre $apellidos'.trim();
 
+            // Solo incluimos si el nombre NO está vacío
+            if (full.isEmpty) return false;
+
+            // Filtro de búsqueda
+            return full.toLowerCase().contains(_workerSearchTerm.toLowerCase());
+          }).toList();
+
+          return AlertDialog(
+            title: const Text("Buscar Trabajador", style: TextStyle(fontWeight: FontWeight.w900)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            content: SizedBox(
+              width: MediaQuery.of(context).size.width * 0.8, // Un poco más ancho para ver bien los nombres
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    decoration: _inputStyle('Escribe nombre o apellido...', Icons.search),
+                    onChanged: (value) {
+                      setDialogState(() => _workerSearchTerm = value);
+                    },
+                  ),
+                  const SizedBox(height: 15),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
+                    child: filteredDocs.isEmpty 
+                      ? const Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Text("No se encontraron trabajadores con nombre configurado"),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: filteredDocs.length,
+                          itemBuilder: (context, i) {
+                            final data = filteredDocs[i].data();
+                            final nombre = (data['nombre'] ?? '').toString();
+                            final apellidos = (data['apellidos'] ?? '').toString();
+                            final full = '$nombre $apellidos'.trim();
+
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: _accent.withOpacity(0.1),
+                                child: Text(nombre.isNotEmpty ? nombre[0].toUpperCase() : "?", 
+                                  style: const TextStyle(color: _accent, fontWeight: FontWeight.bold)),
+                              ),
+                              title: Text(full, style: const TextStyle(fontWeight: FontWeight.w700)),
+                              onTap: () {
+                                setState(() {
+                                  _selectedWorkerId = filteredDocs[i].id;
+                                  _selectedWorkerName = full;
+                                  _workerSearchTerm = '';
+                                });
+                                Navigator.pop(context);
+                              },
+                            );
+                          },
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
   Future<void> _exportEventoPdf() async {
     if (_empresaId == null || _selectedEventoId == null) return;
 

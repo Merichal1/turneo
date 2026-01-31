@@ -30,6 +30,8 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
+  String get _adminUid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
   @override
   void dispose() {
     _messageController.dispose();
@@ -39,10 +41,15 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
 
   /// Referencia a la colección de chats
   CollectionReference<Map<String, dynamic>> get _chatsCollection =>
-      FirebaseFirestore.instance
-          .collection('empresas')
-          .doc(empresaId)
-          .collection('chats_trabajadores');
+      FirebaseFirestore.instance.collection('empresas').doc(empresaId).collection('chats_trabajadores');
+
+  Future<void> _markChatAsReadForAdmin(String workerId) async {
+    if (_adminUid.isEmpty) return;
+    await _chatsCollection.doc(workerId).set(
+      {'unread.$_adminUid': 0},
+      SetOptions(merge: true),
+    );
+  }
 
   /// Envía un mensaje como ADMIN al trabajador seleccionado
   Future<void> _sendMessage() async {
@@ -61,29 +68,35 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
     final batch = FirebaseFirestore.instance.batch();
 
     // Añadimos mensaje
-    final msgRef = mensajesColl.doc();
-    batch.set(msgRef, {
-      'texto': text,
-      'enviadoPor': 'admin',
-      'creadoEn': Timestamp.fromDate(now),
-    });
+final msgRef = mensajesColl.doc();
+batch.set(msgRef, {
+  'texto': text,
+  'enviadoPor': _adminUid,
+  'creadoEn': Timestamp.fromDate(now), // Usa la hora local para que el Stream lo pinte YA
+});
 
     // Aseguramos/actualizamos documento de chat
-    final nombreTrabajador =
-        '${worker.nombre ?? ''} ${worker.apellidos ?? ''}'.trim();
+    final nombreTrabajador = '${worker.nombre ?? ''} ${worker.apellidos ?? ''}'.trim();
 
-    batch.set(
-      chatDoc,
-      {
-        'trabajadorId': worker.id,
-        'trabajadorNombre': nombreTrabajador,
-        'ultimoMensaje': text,
-        'ultimoMensajePor': 'admin',
-        'ultimoMensajeEn': Timestamp.fromDate(now),
-        'creadoEn': FieldValue.serverTimestamp(),
-      },
-      SetOptions(merge: true),
-    );
+    final payload = <String, dynamic>{
+      'ultimoMensajeEn': Timestamp.fromDate(now),
+      'trabajadorId': worker.id,
+      'trabajadorNombre': nombreTrabajador,
+      'ultimoMensaje': text,
+      'ultimoMensajePor': _adminUid.isNotEmpty ? _adminUid : 'admin',
+      'creadoEn': FieldValue.serverTimestamp(),
+
+      // ✅ UNREAD multi-admin:
+      // - el trabajador recibe +1
+      // - ESTE admin lo deja a 0 (porque lo está viendo/enviando)
+      'unread.${worker.id}': FieldValue.increment(1),
+    };
+
+    if (_adminUid.isNotEmpty) {
+      payload['unread.$_adminUid'] = 0;
+    }
+
+    batch.set(chatDoc, payload, SetOptions(merge: true));
 
     await batch.commit();
 
@@ -146,17 +159,22 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
                     width: 320,
                     child: _WorkersPanel(
                       empresaId: empresaId,
+                      adminUid: _adminUid,
                       chatsCollection: _chatsCollection,
                       selectedWorker: _selectedWorker,
                       searchText: _searchText,
                       onSearchChanged: (v) => setState(() => _searchText = v),
-                      onSelectWorker: (t) => setState(() => _selectedWorker = t),
+                      onSelectWorker: (t) async {
+                        setState(() => _selectedWorker = t);
+                        await _markChatAsReadForAdmin(t.id);
+                      },
                     ),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: _ConversationPanel(
                       empresaId: empresaId,
+                      adminUid: _adminUid, // ✅ FIX: pasamos adminUid
                       selectedWorker: _selectedWorker,
                       scrollController: _scrollController,
                       messageController: _messageController,
@@ -175,6 +193,7 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
               children: [
                 // Barra superior: seleccionar trabajador
                 _MobileTopBar(
+                  empresaId: empresaId,
                   selectedWorker: _selectedWorker,
                   onTapSelect: () => _openWorkersSheet(context),
                 ),
@@ -182,6 +201,7 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
                 Expanded(
                   child: _ConversationPanel(
                     empresaId: empresaId,
+                    adminUid: _adminUid, // ✅ FIX: pasamos adminUid
                     selectedWorker: _selectedWorker,
                     scrollController: _scrollController,
                     messageController: _messageController,
@@ -242,13 +262,15 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
                   Expanded(
                     child: _WorkersPanel(
                       empresaId: empresaId,
+                      adminUid: _adminUid,
                       chatsCollection: _chatsCollection,
                       selectedWorker: _selectedWorker,
                       searchText: _searchText,
                       onSearchChanged: (v) => setState(() => _searchText = v),
-                      onSelectWorker: (t) {
+                      onSelectWorker: (t) async {
                         setState(() => _selectedWorker = t);
-                        Navigator.of(context).pop();
+                        await _markChatAsReadForAdmin(t.id);
+                        if (context.mounted) Navigator.of(context).pop();
                       },
                       compact: true,
                     ),
@@ -268,7 +290,6 @@ class _AdminChatScreenState extends State<AdminChatScreen> {
 // ======================================================
 
 class _WorkersPanel extends StatelessWidget {
-  static const Color _bg = Color(0xFFF6F8FC);
   static const Color _card = Colors.white;
   static const Color _border = Color(0xFFE5E7EB);
   static const Color _textDark = Color(0xFF111827);
@@ -276,15 +297,17 @@ class _WorkersPanel extends StatelessWidget {
   static const Color _blue = Color(0xFF2563EB);
 
   final String empresaId;
+  final String adminUid;
   final CollectionReference<Map<String, dynamic>> chatsCollection;
   final Trabajador? selectedWorker;
   final String searchText;
   final ValueChanged<String> onSearchChanged;
-  final ValueChanged<Trabajador> onSelectWorker;
+  final Future<void> Function(Trabajador) onSelectWorker;
   final bool compact;
 
   const _WorkersPanel({
     required this.empresaId,
+    required this.adminUid,
     required this.chatsCollection,
     required this.selectedWorker,
     required this.searchText,
@@ -391,12 +414,22 @@ class _WorkersPanel extends StatelessWidget {
                     final isSelected = selectedWorker?.id == t.id;
                     final nombre = ('${t.nombre ?? ''} ${t.apellidos ?? ''}').trim();
                     final rol = t.puesto ?? '';
+                    final initials = _initials(t.nombre ?? '', t.apellidos ?? '');
+
+                    // ✅ Leemos el doc REAL del trabajador para sacar photoUrl (raíz o perfil.photoUrl)
+                    final workerDocStream = FirebaseFirestore.instance
+                        .collection('empresas')
+                        .doc(empresaId)
+                        .collection('trabajadores')
+                        .doc(t.id)
+                        .snapshots();
 
                     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                       stream: chatsCollection.doc(t.id).snapshots(),
                       builder: (context, chatSnap) {
                         String lastMsg = '';
                         String timeText = '';
+                        int unreadCount = 0;
 
                         if (chatSnap.hasData && chatSnap.data!.exists) {
                           final data = chatSnap.data!.data() ?? {};
@@ -408,88 +441,103 @@ class _WorkersPanel extends StatelessWidget {
                             final m = dt.minute.toString().padLeft(2, '0');
                             timeText = '$h:$m';
                           }
+
+                          final unread = (data['unread'] is Map)
+                              ? Map<String, dynamic>.from(data['unread'])
+                              : <String, dynamic>{};
+                          final v = unread[adminUid];
+                          unreadCount = (v is num) ? v.toInt() : 0;
                         }
 
-                        return InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => onSelectWorker(t),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF9FAFB),
+                        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: workerDocStream,
+                          builder: (context, workerSnap) {
+                            final workerData = workerSnap.data?.data();
+                            final photoUrl = _extractPhotoUrl(workerData);
+
+                            return InkWell(
                               borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: isSelected ? const Color(0xFFBFDBFE) : _border),
-                            ),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 18,
-                                  backgroundColor: isSelected ? const Color(0xFFDBEAFE) : const Color(0xFFE5E7EB),
-                                  child: Text(
-                                    _initial(nombre),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: _textDark,
-                                    ),
-                                  ),
+                              onTap: () => onSelectWorker(t),
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: isSelected ? const Color(0xFFEFF6FF) : const Color(0xFFF9FAFB),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: isSelected ? const Color(0xFFBFDBFE) : _border),
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        nombre.isEmpty ? 'Sin nombre' : nombre,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w900,
-                                          color: _textDark,
-                                        ),
+                                child: Row(
+                                  children: [
+                                    _WorkerAvatar(
+                                      photoUrl: photoUrl,
+                                      initials: initials,
+                                      radius: 18,
+                                      bgSelected: isSelected,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            nombre.isEmpty ? 'Sin nombre' : nombre,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontSize: 14,
+                                              fontWeight: FontWeight.w900,
+                                              color: _textDark,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 2),
+                                          if (rol.isNotEmpty)
+                                            Text(
+                                              rol,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: _textGrey,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          if (lastMsg.isNotEmpty) ...[
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              lastMsg,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Color(0xFF94A3B8),
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
                                       ),
-                                      const SizedBox(height: 2),
-                                      if (rol.isNotEmpty)
-                                        Text(
-                                          rol,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: _textGrey,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      if (lastMsg.isNotEmpty) ...[
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          lastMsg,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: Color(0xFF94A3B8),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                if (timeText.isNotEmpty) ...[
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    timeText,
-                                    style: const TextStyle(
-                                      fontSize: 10,
-                                      color: Color(0xFF94A3B8),
-                                      fontWeight: FontWeight.w700,
                                     ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
+                                    const SizedBox(width: 8),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        if (timeText.isNotEmpty)
+                                          Text(
+                                            timeText,
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              color: Color(0xFF94A3B8),
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        const SizedBox(height: 6),
+                                        if (unreadCount > 0) _Badge(count: unreadCount),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
                         );
                       },
                     );
@@ -502,11 +550,6 @@ class _WorkersPanel extends StatelessWidget {
       ),
     );
   }
-
-  static String _initial(String nombreCompleto) {
-    if (nombreCompleto.trim().isEmpty) return '?';
-    return nombreCompleto.trim()[0].toUpperCase();
-  }
 }
 
 // =============================
@@ -514,14 +557,12 @@ class _WorkersPanel extends StatelessWidget {
 // =============================
 
 class _ConversationPanel extends StatelessWidget {
-  static const Color _bg = Color(0xFFF6F8FC);
   static const Color _card = Colors.white;
   static const Color _border = Color(0xFFE5E7EB);
-  static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
-  static const Color _blue = Color(0xFF2563EB);
 
   final String empresaId;
+  final String adminUid; // ✅ NUEVO (FIX)
   final Trabajador? selectedWorker;
   final ScrollController scrollController;
   final TextEditingController messageController;
@@ -529,6 +570,7 @@ class _ConversationPanel extends StatelessWidget {
 
   const _ConversationPanel({
     required this.empresaId,
+    required this.adminUid, // ✅ NUEVO (FIX)
     required this.selectedWorker,
     required this.scrollController,
     required this.messageController,
@@ -579,11 +621,12 @@ class _ConversationPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _ChatHeader(worker: selectedWorker!),
+          _ChatHeader(empresaId: empresaId, worker: selectedWorker!),
           const Divider(height: 1, color: _border),
           Expanded(
             child: _ChatMessages(
               empresaId: empresaId,
+              adminUid: adminUid, // ✅ FIX: se lo pasamos al chat
               worker: selectedWorker!,
               scrollController: scrollController,
             ),
@@ -603,29 +646,38 @@ class _ChatHeader extends StatelessWidget {
   static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
 
+  final String empresaId;
   final Trabajador worker;
 
-  const _ChatHeader({required this.worker});
+  const _ChatHeader({required this.empresaId, required this.worker});
 
   @override
   Widget build(BuildContext context) {
     final nombre = ('${worker.nombre ?? ''} ${worker.apellidos ?? ''}').trim();
     final rol = worker.puesto ?? '';
+    final initials = _initials(worker.nombre ?? '', worker.apellidos ?? '');
+
+    final workerDocStream = FirebaseFirestore.instance
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('trabajadores')
+        .doc(worker.id)
+        .snapshots();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: const Color(0xFFEFF6FF),
-            child: Text(
-              nombre.isNotEmpty ? nombre[0].toUpperCase() : '?',
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                color: _textDark,
-              ),
-            ),
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: workerDocStream,
+            builder: (context, snap) {
+              final photoUrl = _extractPhotoUrl(snap.data?.data());
+              return _WorkerAvatar(
+                photoUrl: photoUrl,
+                initials: initials,
+                radius: 18,
+              );
+            },
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -662,11 +714,13 @@ class _ChatMessages extends StatelessWidget {
   static const Color _blue = Color(0xFF2563EB);
 
   final String empresaId;
+  final String adminUid; // ✅ NUEVO (FIX)
   final Trabajador worker;
   final ScrollController scrollController;
 
   const _ChatMessages({
     required this.empresaId,
+    required this.adminUid, // ✅ NUEVO (FIX)
     required this.worker,
     required this.scrollController,
   });
@@ -713,7 +767,7 @@ class _ChatMessages extends StatelessWidget {
           itemBuilder: (context, index) {
             final data = docs[index].data();
             final texto = (data['texto'] as String?) ?? '';
-            final enviadoPor = (data['enviadoPor'] as String?) ?? 'worker';
+            final enviadoPor = (data['enviadoPor'] as String?) ?? '';
             final ts = data['creadoEn'] as Timestamp?;
             String timeText = '';
             if (ts != null) {
@@ -723,7 +777,10 @@ class _ChatMessages extends StatelessWidget {
               timeText = '$h:$m';
             }
 
-            final isMe = enviadoPor == 'admin';
+            // ✅ FIX REAL:
+            // Antes: enviadoPor != 'worker'  -> el uid del trabajador NO es 'worker' => se veía como admin
+            // Ahora: "mío" SOLO si lo envió este admin (o legacy 'admin')
+            final isMe = (enviadoPor == adminUid) || (enviadoPor == 'admin');
 
             return Align(
               alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -812,6 +869,8 @@ class _ChatInput extends StatelessWidget {
                 controller: controller,
                 minLines: 1,
                 maxLines: 5,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => onSend(),
                 decoration: const InputDecoration(
                   hintText: 'Escribe un mensaje…',
                   border: InputBorder.none,
@@ -852,10 +911,12 @@ class _MobileTopBar extends StatelessWidget {
   static const Color _textDark = Color(0xFF111827);
   static const Color _textGrey = Color(0xFF6B7280);
 
+  final String empresaId;
   final Trabajador? selectedWorker;
   final VoidCallback onTapSelect;
 
   const _MobileTopBar({
+    required this.empresaId,
     required this.selectedWorker,
     required this.onTapSelect,
   });
@@ -887,7 +948,25 @@ class _MobileTopBar extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.people_alt_outlined, color: _textDark),
+            if (selectedWorker == null)
+              const Icon(Icons.people_alt_outlined, color: _textDark)
+            else
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance
+                    .collection('empresas')
+                    .doc(empresaId)
+                    .collection('trabajadores')
+                    .doc(selectedWorker!.id)
+                    .snapshots(),
+                builder: (context, snap) {
+                  final photoUrl = _extractPhotoUrl(snap.data?.data());
+                  return _WorkerAvatar(
+                    photoUrl: photoUrl,
+                    initials: _initials(selectedWorker!.nombre ?? '', selectedWorker!.apellidos ?? ''),
+                    radius: 16,
+                  );
+                },
+              ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -920,4 +999,128 @@ class _MobileTopBar extends StatelessWidget {
       ),
     );
   }
+}
+
+// ======================================================
+// AVATAR ROBUSTO (foto o iniciales, nunca se rompe en web)
+// ======================================================
+
+class _WorkerAvatar extends StatelessWidget {
+  final String photoUrl;
+  final String initials;
+  final double radius;
+  final bool bgSelected;
+
+  const _WorkerAvatar({
+    required this.photoUrl,
+    required this.initials,
+    required this.radius,
+    this.bgSelected = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto = photoUrl.trim().isNotEmpty;
+    final size = radius * 2;
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: bgSelected ? const Color(0xFFDBEAFE) : const Color(0xFFEFF6FF),
+      child: ClipOval(
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: hasPhoto
+              ? Image.network(
+                  photoUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _InitialsAvatar(initials: initials.isEmpty ? '?' : initials),
+                  loadingBuilder: (ctx, child, progress) {
+                    if (progress == null) return child;
+                    return const Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  },
+                )
+              : _InitialsAvatar(initials: initials.isEmpty ? '?' : initials),
+        ),
+      ),
+    );
+  }
+}
+
+class _InitialsAvatar extends StatelessWidget {
+  final String initials;
+  const _InitialsAvatar({required this.initials});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFFEFF6FF),
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: const TextStyle(
+          color: Color(0xFF2563EB),
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  final int count;
+  const _Badge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = count > 99 ? '99+' : count.toString();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white, width: 2),
+      ),
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w900,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
+// ======================================================
+// HELPERS
+// ======================================================
+
+String _initials(String nombre, String apellidos) {
+  final n = nombre.trim();
+  final a = apellidos.trim();
+  if (n.isEmpty && a.isEmpty) return '?';
+  final first = n.isNotEmpty ? n[0].toUpperCase() : '?';
+  final second = a.isNotEmpty ? a[0].toUpperCase() : '';
+  return '$first$second';
+}
+
+String _extractPhotoUrl(Map<String, dynamic>? data) {
+  if (data == null) return '';
+  String readString(dynamic v) => (v ?? '').toString().trim();
+
+  final perfil = (data['perfil'] is Map) ? Map<String, dynamic>.from(data['perfil']) : <String, dynamic>{};
+
+  final photoUrlRoot = readString(data['photoUrl']);
+  final photoUrlPerfil = readString(perfil['photoUrl']);
+
+  return photoUrlRoot.isNotEmpty ? photoUrlRoot : photoUrlPerfil;
 }
