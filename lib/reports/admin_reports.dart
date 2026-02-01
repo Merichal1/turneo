@@ -11,26 +11,17 @@ class AdminReports {
   static final _fmtDate = DateFormat('dd/MM/yyyy', 'es_ES');
   static final _fmtDateTime = DateFormat('dd/MM/yyyy HH:mm', 'es_ES');
 
-  // =====================================================
-  // PALETA FORMAL (MONOCROMO + ACENTO MUY DISCRETO)
-  // =====================================================
-  // Acento corporativo (muy contenido)
-  static const PdfColor _accent = PdfColor.fromInt(0xFF1F2A37); // gris-azulado (sobrio)
-  static const PdfColor _accentSoft = PdfColor.fromInt(0xFFF3F4F6); // gris muy suave
-
-  // Texto
+  // ====== ESTILO MINIMAL (BLANCO, PROFESIONAL) ======
   static const PdfColor _text = PdfColor.fromInt(0xFF111827);
   static const PdfColor _muted = PdfColor.fromInt(0xFF6B7280);
-
-  // Superficies / Bordes
   static const PdfColor _border = PdfColor.fromInt(0xFFE5E7EB);
-  static const PdfColor _bg = PdfColor.fromInt(0xFFFFFFFF);
-  static const PdfColor _bgSoft = PdfColor.fromInt(0xFFF9FAFB);
+  static const PdfColor _rowAlt = PdfColor.fromInt(0xFFF9FAFB);
 
-  // Estados (sin colores chillones)
-  static const PdfColor _stateOk = PdfColor.fromInt(0xFF111827); // mismo tono sobrio
-  static const PdfColor _stateWarn = PdfColor.fromInt(0xFF374151);
-  static const PdfColor _stateBad = PdfColor.fromInt(0xFF4B5563);
+  static const PdfColor _tableHeadBg = PdfColor.fromInt(0xFFF3F4F6);
+  static const PdfColor _tableHeadText = PdfColor.fromInt(0xFF111827);
+
+  // Márgenes estándar
+  static const pw.EdgeInsets _margin = pw.EdgeInsets.fromLTRB(28, 28, 28, 28);
 
   // =========================
   // INFORME 1: ASISTENCIAS + PAGOS (EVENTO)
@@ -49,9 +40,6 @@ class AdminReports {
 
     final evento = eventoDoc.data() ?? {};
     final nombreEvento = (evento['nombre'] ?? 'Evento').toString();
-
-    final fechaInicio = _tsToDate(evento['fechaInicio']);
-    final fechaFin = _tsToDate(evento['fechaFin']);
 
     final asistidosSnap = await db
         .collection('empresas')
@@ -83,79 +71,23 @@ class AdminReports {
     }).toList()
       ..sort((a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()));
 
-    final total = rows.length;
-    final paid = rows.where((r) => r.pagado).length;
-    final pending = total - paid;
-    final rate = total == 0 ? 0 : (paid / total);
-
-    // Distribución por roles (top)
-    final roleCounts = <String, int>{};
-    for (final r in rows) {
-      final key = r.rol.isEmpty ? 'Sin rol' : r.rol;
-      roleCounts[key] = (roleCounts[key] ?? 0) + 1;
-    }
-    final topRoles = roleCounts.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final topRoleBars = topRoles.take(8).map((e) => _BarItem(label: e.key, value: e.value)).toList();
-
     final doc = pw.Document(
       author: 'Turneo',
-      title: 'Informe de pagos y asistencias',
+      title: 'Asistencias y pagos',
       subject: nombreEvento,
     );
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
-        header: (ctx) => _headerFormal(
-          title: 'Informe de pagos y asistencias',
-          subtitle: nombreEvento,
-        ),
-        footer: (ctx) => _footerFormal(ctx),
+        margin: _margin,
+        // SIN header/footer
         build: (context) => [
-          _metaStrip(meta: [
-            if (fechaInicio != null) _kv('Inicio', _fmtDate.format(fechaInicio)),
-            if (fechaFin != null) _kv('Fin', _fmtDate.format(fechaFin)),
-            _kv('Asistentes', '$total'),
-            _kv('Pagados', '$paid'),
-            _kv('Pendientes', '$pending'),
-          ]),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Resumen ejecutivo'),
+          // SOLO información (si quieres 0 texto, borra estas 2 líneas)
+          _tinyTitle('Asistencias y pagos — $nombreEvento'),
           pw.SizedBox(height: 10),
-          _kpiRow([
-            _kpiCardFormal('Asistentes', '$total'),
-            _kpiCardFormal('Pagados', '$paid'),
-            _kpiCardFormal('Pendientes', '$pending'),
-            _kpiCardFormal('Tasa de pago', '${(rate * 100).round()}%'),
-          ]),
-          pw.SizedBox(height: 14),
 
-          _sectionTitleFormal('Indicador: Pagados vs Pendientes'),
-          pw.SizedBox(height: 8),
-          _barCompareFormal(
-            leftLabel: 'Pagados',
-            leftValue: paid,
-            rightLabel: 'Pendientes',
-            rightValue: pending,
-          ),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Distribución por roles (Top)'),
-          pw.SizedBox(height: 8),
-          topRoleBars.isEmpty
-              ? _emptyBox('No hay roles suficientes para graficar.')
-              : _barListFormal(items: topRoleBars),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Detalle de asistentes'),
-          pw.SizedBox(height: 10),
           _tableAsistencias(rows),
-          pw.SizedBox(height: 10),
-
-          _note('Documento generado automáticamente desde Turneo.'),
         ],
       ),
     );
@@ -208,60 +140,23 @@ class AdminReports {
       return _EventoRow(nombre: nombre, inicio: inicio, fin: fin, ciudad: ciudad);
     }).toList();
 
-    final total = eventos.length;
-
-    // Eventos por mes (gráfica)
-    final byMonth = <String, int>{};
-    for (final e in eventos) {
-      final d = e.inicio;
-      if (d == null) continue;
-      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-      byMonth[key] = (byMonth[key] ?? 0) + 1;
-    }
-    final monthBars = byMonth.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
-    final barItems = monthBars.take(12).map((e) {
-      final parts = e.key.split('-');
-      final yy = parts.isNotEmpty ? parts[0] : '????';
-      final mm = parts.length > 1 ? parts[1] : '??';
-      return _BarItem(label: '$mm/$yy', value: e.value);
-    }).toList();
-
     final doc = pw.Document(
       author: 'Turneo',
-      title: 'Informe corporativo de eventos',
+      title: 'Listado de eventos',
       subject: 'Empresa $empresaId',
     );
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
-        header: (ctx) => _headerFormal(
-          title: 'Informe corporativo de eventos',
-          subtitle: 'Empresa: $empresaId',
-        ),
-        footer: (ctx) => _footerFormal(ctx),
+        margin: _margin,
+        // SIN header/footer
         build: (context) => [
-          _metaStrip(meta: [
-            _kv('Rango', rangoTxt),
-            _kv('Total eventos', '$total'),
-          ]),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Eventos por mes'),
-          pw.SizedBox(height: 8),
-          barItems.isEmpty
-              ? _emptyBox('No hay datos suficientes para graficar.')
-              : _barListFormal(items: barItems),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Listado de eventos'),
+          // SOLO información (si quieres 0 texto, borra estas 2 líneas)
+          _tinyTitle('Listado de eventos — $rangoTxt'),
           pw.SizedBox(height: 10),
+
           _tableEventos(eventos),
-          pw.SizedBox(height: 10),
-
-          _note('Documento generado automáticamente desde Turneo.'),
         ],
       ),
     );
@@ -353,62 +248,25 @@ class AdminReports {
       ));
     }
 
-    final total = rows.length;
-    final asistidos = rows.where((r) => r.asistio).length;
-    final noAsistio = total - asistidos;
-    final pendientes = rows.where((r) => r.asistio && !r.pagado).length;
-
     final doc = pw.Document(
       author: 'Turneo',
-      title: 'Informe de actividad del trabajador',
+      title: 'Actividad del trabajador',
       subject: trabajadorNombre,
     );
 
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
-        header: (ctx) => _headerFormal(
-          title: 'Informe de actividad del trabajador',
-          subtitle: trabajadorNombre,
-        ),
-        footer: (ctx) => _footerFormal(ctx),
+        margin: _margin,
+        // SIN header/footer
         build: (context) => [
-          _metaStrip(meta: [
-            _kv('Empresa', empresaId),
-            _kv('Eventos encontrados', '$total'),
-            _kv('Asistió', '$asistidos'),
-            _kv('No asistió', '$noAsistio'),
-            _kv('Pendientes (asistió)', '$pendientes'),
-          ]),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Resumen ejecutivo'),
-          pw.SizedBox(height: 10),
-          _kpiRow([
-            _kpiCardFormal('Eventos', '$total'),
-            _kpiCardFormal('Asistió', '$asistidos'),
-            _kpiCardFormal('No asistió', '$noAsistio'),
-            _kpiCardFormal('Pendientes', '$pendientes'),
-          ]),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Indicador: Asistió vs No asistió'),
-          pw.SizedBox(height: 8),
-          _barCompareFormal(
-            leftLabel: 'Asistió',
-            leftValue: asistidos,
-            rightLabel: 'No asistió',
-            rightValue: noAsistio,
-          ),
-          pw.SizedBox(height: 14),
-
-          _sectionTitleFormal('Detalle de actividad'),
-          pw.SizedBox(height: 10),
-          rows.isEmpty ? _emptyBox('No se han encontrado registros para este trabajador.') : _tableActividad(rows),
+          // SOLO información (si quieres 0 texto, borra estas 2 líneas)
+          _tinyTitle('Actividad del trabajador — $trabajadorNombre'),
           pw.SizedBox(height: 10),
 
-          _note('Documento generado automáticamente desde Turneo.'),
+          rows.isEmpty
+              ? _emptyText('No se han encontrado registros.')
+              : _tableActividad(rows),
         ],
       ),
     );
@@ -417,363 +275,29 @@ class AdminReports {
   }
 
   // =====================================================
-  // COMPONENTES FORMALES
+  // COMPONENTES MINIMAL (SOLO TEXTO/TABLA)
   // =====================================================
 
-  static pw.Widget _headerFormal({required String title, required String subtitle}) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 10),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(bottom: pw.BorderSide(color: _border, width: 1)),
-      ),
-      child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          // “Marca” sobria (sin bloque azul)
-          pw.Container(
-            width: 38,
-            height: 38,
-            decoration: pw.BoxDecoration(
-              color: _text,
-              borderRadius: pw.BorderRadius.circular(10),
-            ),
-            child: pw.Center(
-              child: pw.Text(
-                'T',
-                style: pw.TextStyle(
-                  color: PdfColors.white,
-                  fontWeight: pw.FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-            ),
-          ),
-          pw.SizedBox(width: 12),
-          pw.Expanded(
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  title,
-                  style: pw.TextStyle(
-                    fontSize: 14,
-                    color: _text,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 2),
-                pw.Text(subtitle, style: pw.TextStyle(fontSize: 10, color: _muted)),
-              ],
-            ),
-          ),
-          pw.Container(
-            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: pw.BoxDecoration(
-              color: _bgSoft,
-              borderRadius: pw.BorderRadius.circular(999),
-              border: pw.Border.all(color: _border),
-            ),
-            child: pw.Text(
-              _fmtDateTime.format(DateTime.now()),
-              style: pw.TextStyle(fontSize: 9, color: _muted),
-            ),
-          ),
-        ],
+  static pw.Widget _tinyTitle(String text) {
+    return pw.Text(
+      text,
+      style: pw.TextStyle(
+        fontSize: 11,
+        fontWeight: pw.FontWeight.bold,
+        color: _text,
       ),
     );
   }
 
-  static pw.Widget _footerFormal(pw.Context ctx) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.only(top: 10),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(top: pw.BorderSide(color: _border, width: 1)),
-      ),
-      child: pw.Row(
-        children: [
-          pw.Text('Turneo • Documentación interna', style: pw.TextStyle(fontSize: 9, color: _muted)),
-          pw.Spacer(),
-          pw.Text('Página ${ctx.pageNumber} de ${ctx.pagesCount}', style: pw.TextStyle(fontSize: 9, color: _muted)),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _sectionTitleFormal(String text) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: pw.BoxDecoration(
-        color: _bgSoft,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Row(
-        children: [
-          // acento mínimo (barra fina gris-azulada)
-          pw.Container(
-            width: 4,
-            height: 16,
-            decoration: pw.BoxDecoration(
-              color: _accent,
-              borderRadius: pw.BorderRadius.circular(999),
-            ),
-          ),
-          pw.SizedBox(width: 10),
-          pw.Text(
-            text,
-            style: pw.TextStyle(
-              fontSize: 11,
-              color: _text,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _metaStrip({required List<pw.Widget> meta}) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: _bg,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Wrap(spacing: 10, runSpacing: 8, children: meta),
-    );
-  }
-
-  static pw.Widget _kv(String k, String v) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: pw.BoxDecoration(
-        color: _bgSoft,
-        borderRadius: pw.BorderRadius.circular(999),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.RichText(
-        text: pw.TextSpan(
-          children: [
-            pw.TextSpan(text: '$k: ', style: pw.TextStyle(fontSize: 9, color: _muted, fontWeight: pw.FontWeight.bold)),
-            pw.TextSpan(text: v, style: pw.TextStyle(fontSize: 9, color: _text)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static pw.Widget _kpiRow(List<pw.Widget> cards) {
-    return pw.Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: cards.map((c) => pw.SizedBox(width: 130, child: c)).toList(),
-    );
-  }
-
-  static pw.Widget _kpiCardFormal(String label, String value) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: _bg,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Row(
-            children: [
-              pw.Container(
-                width: 10,
-                height: 10,
-                decoration: pw.BoxDecoration(color: _accent, shape: pw.BoxShape.circle),
-              ),
-              pw.Spacer(),
-              pw.Container(
-                width: 26,
-                height: 18,
-                decoration: pw.BoxDecoration(
-                  color: _accentSoft,
-                  borderRadius: pw.BorderRadius.circular(6),
-                  border: pw.Border.all(color: _border),
-                ),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 8),
-          pw.Text(label, style: pw.TextStyle(fontSize: 9, color: _muted, fontWeight: pw.FontWeight.bold)),
-          pw.SizedBox(height: 3),
-          pw.Text(value, style: pw.TextStyle(fontSize: 14, color: _text, fontWeight: pw.FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _note(String text) => pw.Text(text, style: pw.TextStyle(fontSize: 9, color: _muted));
-
-  static pw.Widget _emptyBox(String text) {
-    return pw.Container(
-      width: double.infinity,
-      padding: const pw.EdgeInsets.all(14),
-      decoration: pw.BoxDecoration(
-        color: _bgSoft,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Text(text, style: pw.TextStyle(fontSize: 10, color: _muted)),
+  static pw.Widget _emptyText(String text) {
+    return pw.Text(
+      text,
+      style: pw.TextStyle(fontSize: 10, color: _muted),
     );
   }
 
   // =====================================================
-  // “GRÁFICAS” FORMALES (en gris)
-  // =====================================================
-
-  static pw.Widget _barCompareFormal({
-    required String leftLabel,
-    required int leftValue,
-    required String rightLabel,
-    required int rightValue,
-  }) {
-    final maxV = leftValue > rightValue ? leftValue : rightValue;
-    final denom = maxV <= 0 ? 1 : maxV;
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: _bg,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Column(
-        children: [
-          _barLineFormal(label: leftLabel, value: leftValue, max: denom),
-          pw.SizedBox(height: 10),
-          _barLineFormal(label: rightLabel, value: rightValue, max: denom),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _barLineFormal({
-    required String label,
-    required int value,
-    required int max,
-  }) {
-    final v = value < 0 ? 0 : value;
-    final m = max <= 0 ? 1 : max;
-    final fillFlex = ((v / m) * 1000).round().clamp(0, 1000);
-    final emptyFlex = 1000 - fillFlex;
-
-    return pw.Row(
-      children: [
-        pw.SizedBox(
-          width: 110,
-          child: pw.Text(label, style: pw.TextStyle(fontSize: 10, color: _text, fontWeight: pw.FontWeight.bold)),
-        ),
-        pw.Expanded(
-          child: pw.Container(
-            height: 10,
-            decoration: pw.BoxDecoration(
-              color: _bgSoft,
-              borderRadius: pw.BorderRadius.circular(999),
-              border: pw.Border.all(color: _border),
-            ),
-            child: pw.Row(
-              children: [
-                pw.Expanded(
-                  flex: fillFlex,
-                  child: pw.Container(
-                    height: 10,
-                    decoration: pw.BoxDecoration(
-                      color: _stateOk,
-                      borderRadius: pw.BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                pw.Expanded(flex: emptyFlex, child: pw.SizedBox()),
-              ],
-            ),
-          ),
-        ),
-        pw.SizedBox(width: 10),
-        pw.SizedBox(
-          width: 40,
-          child: pw.Text('$value', textAlign: pw.TextAlign.right, style: pw.TextStyle(fontSize: 10, color: _muted)),
-        ),
-      ],
-    );
-  }
-
-  static pw.Widget _barListFormal({
-    required List<_BarItem> items,
-  }) {
-    final maxV = items.map((e) => e.value).fold<int>(0, (p, c) => c > p ? c : p);
-    final denom = maxV <= 0 ? 1 : maxV;
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: _bg,
-        borderRadius: pw.BorderRadius.circular(12),
-        border: pw.Border.all(color: _border),
-      ),
-      child: pw.Column(
-        children: items.map((e) {
-          final v = e.value < 0 ? 0 : e.value;
-          final fillFlex = ((v / denom) * 1000).round().clamp(0, 1000);
-          final emptyFlex = 1000 - fillFlex;
-
-          return pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 6),
-            child: pw.Row(
-              children: [
-                pw.SizedBox(
-                  width: 140,
-                  child: pw.Text(
-                    e.label,
-                    maxLines: 1,
-                    overflow: pw.TextOverflow.clip,
-                    style: pw.TextStyle(fontSize: 9, color: _text, fontWeight: pw.FontWeight.bold),
-                  ),
-                ),
-                pw.Expanded(
-                  child: pw.Container(
-                    height: 8,
-                    decoration: pw.BoxDecoration(
-                      color: _bgSoft,
-                      borderRadius: pw.BorderRadius.circular(999),
-                      border: pw.Border.all(color: _border),
-                    ),
-                    child: pw.Row(
-                      children: [
-                        pw.Expanded(
-                          flex: fillFlex,
-                          child: pw.Container(
-                            height: 8,
-                            decoration: pw.BoxDecoration(
-                              color: _stateWarn,
-                              borderRadius: pw.BorderRadius.circular(999),
-                            ),
-                          ),
-                        ),
-                        pw.Expanded(flex: emptyFlex, child: pw.SizedBox()),
-                      ],
-                    ),
-                  ),
-                ),
-                pw.SizedBox(width: 10),
-                pw.Text('${e.value}', style: pw.TextStyle(fontSize: 9, color: _muted)),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  // =====================================================
-  // TABLAS (FORMAL)
+  // TABLAS
   // =====================================================
 
   static pw.Widget _tableAsistencias(List<_RowAsistencia> rows) {
@@ -787,7 +311,7 @@ class AdminReports {
     return _table(
       headers: const ['Trabajador', 'Rol', 'Pagado', 'Pagado en'],
       data: data,
-      colFlex: const [32, 20, 10, 20],
+      colFlex: const [32, 18, 10, 20],
       fontSize: 10,
     );
   }
@@ -807,7 +331,7 @@ class AdminReports {
     return _table(
       headers: const ['Evento', 'Inicio', 'Fin', 'Ciudad'],
       data: data,
-      colFlex: const [32, 14, 14, 20],
+      colFlex: const [34, 14, 14, 18],
       fontSize: 10,
     );
   }
@@ -830,7 +354,7 @@ class AdminReports {
     return _table(
       headers: const ['Evento', 'Inicio', 'Fin', 'Rol', 'Asistió', 'Pagado', 'Pagado en'],
       data: data,
-      colFlex: const [32, 12, 12, 16, 10, 10, 20],
+      colFlex: const [30, 12, 12, 16, 10, 10, 20],
       fontSize: 9,
     );
   }
@@ -850,12 +374,19 @@ class AdminReports {
       return pw.Container(
         alignment: align,
         padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: pw.BoxDecoration(color: bg ?? _bg),
+        decoration: pw.BoxDecoration(
+          color: bg ?? PdfColors.white,
+          border: header
+              ? pw.Border(bottom: const pw.BorderSide(color: _border, width: 1))
+              : null,
+        ),
         child: pw.Text(
           text,
+          maxLines: 2,
+          overflow: pw.TextOverflow.clip,
           style: pw.TextStyle(
             fontSize: fontSize,
-            color: header ? PdfColors.white : _text,
+            color: header ? _tableHeadText : _text,
             fontWeight: header ? pw.FontWeight.bold : pw.FontWeight.normal,
           ),
         ),
@@ -864,14 +395,14 @@ class AdminReports {
 
     final headerRow = pw.TableRow(
       children: List.generate(headers.length, (i) {
-        return cell(headers[i], bg: _text, header: true);
+        return cell(headers[i], bg: _tableHeadBg, header: true);
       }),
     );
 
     final rows = <pw.TableRow>[headerRow];
 
     for (int r = 0; r < data.length; r++) {
-      final bg = (r % 2 == 0) ? _bg : _bgSoft;
+      final bg = (r % 2 == 0) ? PdfColors.white : _rowAlt;
 
       rows.add(
         pw.TableRow(
@@ -886,17 +417,18 @@ class AdminReports {
     return pw.Container(
       decoration: pw.BoxDecoration(
         border: pw.Border.all(color: _border, width: 0.8),
-        borderRadius: pw.BorderRadius.circular(10),
+        borderRadius: pw.BorderRadius.circular(8),
       ),
       child: pw.ClipRRect(
-        horizontalRadius: 10,
-        verticalRadius: 10,
+        horizontalRadius: 8,
+        verticalRadius: 8,
         child: pw.Table(
           border: pw.TableBorder.symmetric(
             inside: pw.BorderSide(color: _border, width: 0.6),
           ),
           columnWidths: {
-            for (int i = 0; i < colFlex.length; i++) i: pw.FlexColumnWidth(colFlex[i].toDouble()),
+            for (int i = 0; i < colFlex.length; i++)
+              i: pw.FlexColumnWidth(colFlex[i].toDouble()),
           },
           children: rows,
         ),
