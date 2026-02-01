@@ -1,12 +1,11 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
+
 import '../../config/app_config.dart';
 import '../../reports/admin_reports.dart';
 
@@ -30,15 +29,18 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
   static const Color _warn = Color(0xFFF59E0B);
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  // Dentro de la clase _AdminPaymentsHistoryScreenState
-  final TextEditingController _eventoSearchCtrl = TextEditingController(); // Para el buscador de eventos
-  String _eventoSearchTerm = ''; // El término de búsqueda del evento
 
-  String _workerSearchTerm = ''; // Para filtrar el buscador de trabajadores
+  // Buscador eventos (dialog)
+  final TextEditingController _eventoSearchCtrl = TextEditingController();
+  String _eventoSearchTerm = '';
 
-  // UI state
+  // Worker search (dialog)
+  String _workerSearchTerm = '';
+
+  // Search asistentes (tab pagos)
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchTerm = '';
+
   int _tab = 0; // 0 pagos, 1 informes
 
   // Data selection
@@ -48,90 +50,37 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
   bool _isGenerating = false;
 
-  // Range analytics (opcional, para informes globales)
   DateTimeRange? _range;
 
   // Worker selection for report (global)
-  String? _selectedWorkerId;
+  String? _selectedWorkerId; // docId de /trabajadores/{docId}
   String? _selectedWorkerName;
 
-@override
-void initState() {
-  super.initState();
+  // extra para compatibilidad en informes
+  String? _selectedWorkerUid;
+  String? _selectedWorkerEmail;
 
-  // ✅ SIEMPRE disponible y no depende de queries raros
-  _empresaId = AppConfig.empresaId;
+  @override
+  void initState() {
+    super.initState();
 
-  _searchCtrl.addListener(() {
-    setState(() => _searchTerm = _searchCtrl.text.trim().toLowerCase());
-  });
-}
+    _empresaId = AppConfig.empresaId;
 
-void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs) {
-  showDialog(
-    context: context,
-    builder: (context) {
-      return StatefulBuilder( // Necesario para que el buscador funcione dentro del dialog
-        builder: (context, setDialogState) {
-          // Filtramos la lista según lo que escriba el usuario
-          final filteredDocs = allDocs.where((doc) {
-            final name = (doc.data()['nombre'] ?? '').toString().toLowerCase();
-            return name.contains(_eventoSearchTerm.toLowerCase());
-          }).toList();
+    _searchCtrl.addListener(() {
+      setState(() => _searchTerm = _searchCtrl.text.trim().toLowerCase());
+    });
+  }
 
-          return AlertDialog(
-            title: const Text("Buscar Evento", style: TextStyle(fontWeight: FontWeight.w900)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    decoration: _inputStyle('Nombre del evento...', Icons.search),
-                    onChanged: (value) {
-                      setDialogState(() => _eventoSearchTerm = value);
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      itemCount: filteredDocs.length,
-                      itemBuilder: (context, i) {
-                        final data = filteredDocs[i].data();
-                        return ListTile(
-                          title: Text(data['nombre'] ?? 'Sin nombre', style: const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text(DateFormat('dd/MM/yyyy').format((data['fechaInicio'] as Timestamp).toDate())),
-                          onTap: () {
-                            setState(() {
-                              _selectedEventoId = filteredDocs[i].id;
-                              _selectedEventoData = data;
-                              _eventoSearchTerm = ''; // Limpiamos para la próxima vez
-                            });
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _eventoSearchCtrl.dispose();
     super.dispose();
   }
 
-
+  // ===========================
+  // BUILD
+  // ===========================
   @override
   Widget build(BuildContext context) {
     if (_empresaId == null) {
@@ -146,19 +95,12 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
       body: CustomScrollView(
         slivers: [
           _buildSliverAppBar(),
-
-          // Selector evento + tabs
           SliverToBoxAdapter(child: _buildTopControls()),
-
-          // Contenido según tab
           if (_tab == 0) ...[
-            // PAGOS
             _buildAsistentesGrid(),
           ] else ...[
-            // INFORMES + RENDIMIENTO
             SliverToBoxAdapter(child: _buildReportsAndAnalytics()),
           ],
-
           const SliverPadding(padding: EdgeInsets.only(bottom: 36)),
         ],
       ),
@@ -206,7 +148,7 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
   }
 
   // ===========================
-  // TOP CONTROLS (evento + tabs + search)
+  // TOP CONTROLS
   // ===========================
   Widget _buildTopControls() {
     return Padding(
@@ -234,46 +176,115 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
       ),
     );
   }
+
+  // ---------- Evento selector ----------
   Widget _buildEventoSelector() {
-  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-    stream: _db
-        .collection('empresas')
-        .doc(_empresaId)
-        .collection('eventos')
-        .orderBy('fechaInicio', descending: true)
-        .snapshots(),
-    builder: (context, snap) {
-      if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _db
+          .collection('empresas')
+          .doc(_empresaId)
+          .collection('eventos')
+          .orderBy('fechaInicio', descending: true)
+          .snapshots(),
+      builder: (context, snap) {
+        if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
 
-      final docs = snap.data!.docs;
-      // Buscamos el nombre del evento seleccionado para mostrarlo en el campo
-      final selectedEventName = _selectedEventoData?['nombre'] ?? 'Seleccionar evento';
+        final docs = snap.data!.docs;
+        final selectedEventName = (_selectedEventoData?['nombre'] ?? 'Seleccionar evento').toString();
 
-      return InkWell(
-        onTap: () => _showEventoSearchDialog(context, docs),
-        child: InputDecorator(
-          decoration: _inputStyle('Evento', Icons.event_outlined),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  selectedEventName,
-                  style: TextStyle(
-                    color: _selectedEventoId == null ? _textSecondary : _textMain,
-                    fontWeight: FontWeight.w600,
+        return InkWell(
+          onTap: () => _showEventoSearchDialog(context, docs),
+          child: InputDecorator(
+            decoration: _inputStyle('Evento', Icons.event_outlined),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    selectedEventName,
+                    style: TextStyle(
+                      color: _selectedEventoId == null ? _textSecondary : _textMain,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
+                ),
+                const Icon(Icons.arrow_drop_down, color: _textSecondary),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showEventoSearchDialog(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs,
+  ) {
+    _eventoSearchTerm = '';
+    _eventoSearchCtrl.text = '';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final filteredDocs = allDocs.where((doc) {
+              final name = (doc.data()['nombre'] ?? '').toString().toLowerCase();
+              return name.contains(_eventoSearchTerm.toLowerCase());
+            }).toList();
+
+            return AlertDialog(
+              title: const Text("Buscar Evento", style: TextStyle(fontWeight: FontWeight.w900)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: _eventoSearchCtrl,
+                      decoration: _inputStyle('Nombre del evento...', Icons.search),
+                      onChanged: (value) => setDialogState(() => _eventoSearchTerm = value),
+                    ),
+                    const SizedBox(height: 15),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.45),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: filteredDocs.length,
+                        itemBuilder: (context, i) {
+                          final data = filteredDocs[i].data();
+                          final ts = data['fechaInicio'];
+                          final dt = ts is Timestamp ? ts.toDate() : null;
+                          return ListTile(
+                            title: Text(
+                              (data['nombre'] ?? 'Sin nombre').toString(),
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(dt == null ? '' : DateFormat('dd/MM/yyyy').format(dt)),
+                            onTap: () {
+                              setState(() {
+                                _selectedEventoId = filteredDocs[i].id;
+                                _selectedEventoData = data;
+                              });
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Icon(Icons.arrow_drop_down, color: _textSecondary),
-            ],
-          ),
-        ),
-      );
-    },
-  );
-}
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget _buildTabs() {
     return LayoutBuilder(
       builder: (context, c) {
@@ -362,7 +373,6 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
           return name.contains(_searchTerm);
         }).toList();
 
-        // Header KPI rápido
         final pagados = docs.where((d) => d.data()['pagado'] == true).length;
         final pendientes = docs.length - pagados;
 
@@ -401,7 +411,6 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
                 ),
               ),
               const SizedBox(height: 12),
-
               if (filtered.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(20),
@@ -411,9 +420,8 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
                 LayoutBuilder(
                   builder: (context, c) {
                     final w = c.maxWidth;
-                    // tamaños amigables + sin overflow
                     final crossAxisCount = w >= 980 ? 3 : (w >= 680 ? 2 : 1);
-                    final tileHeight = 96.0;
+                    const tileHeight = 96.0;
 
                     return GridView.builder(
                       shrinkWrap: true,
@@ -452,7 +460,6 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Column(
         children: [
-          // Bloque informes
           _CardShell(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,7 +475,6 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
                 ),
                 const SizedBox(height: 14),
 
-                // Row buttons responsive
                 LayoutBuilder(
                   builder: (context, c) {
                     final isWide = c.maxWidth >= 860;
@@ -522,10 +528,7 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
               ],
             ),
           ),
-
           const SizedBox(height: 12),
-
-          // Dashboard rendimiento (solo si hay evento)
           if (_selectedEventoId != null) _buildAnalyticsDashboard(),
         ],
       ),
@@ -536,7 +539,6 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Range selector
         Row(
           children: [
             Expanded(
@@ -581,52 +583,52 @@ void _showEventoSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
         ),
         const SizedBox(height: 10),
 
-        // Worker selector for global report
-        // Worker selector for global report filtrable
-StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-  stream: _db
-      .collection('empresas')
-      .doc(_empresaId)
-      .collection('trabajadores')
-      .orderBy('nombre_lower')
-      .snapshots(),
-  builder: (context, snap) {
-    if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
-    final docs = snap.data!.docs;
+        // ✅ IMPORTANTE: sin orderBy para no "perder" docs que no tengan nombre_lower
+        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _db
+              .collection('empresas')
+              .doc(_empresaId)
+              .collection('trabajadores')
+              .snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData) return const LinearProgressIndicator(minHeight: 2);
+            final docs = snap.data!.docs;
 
-    // Texto a mostrar en el campo
-    final displayText = (_selectedWorkerName != null && _selectedWorkerName!.isNotEmpty)
-        ? _selectedWorkerName!
-        : 'Seleccionar trabajador (para informe global)';
+            final displayText = (_selectedWorkerName != null && _selectedWorkerName!.isNotEmpty)
+                ? _selectedWorkerName!
+                : 'Seleccionar trabajador (para informe global)';
 
-    return InkWell(
-      onTap: () => _showWorkerSearchDialog(context, docs),
-      child: InputDecorator(
-        decoration: _inputStyle('Trabajador', Icons.person_outline),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Text(
-                displayText,
-                style: TextStyle(
-                  color: _selectedWorkerId == null ? _textSecondary : _textMain,
-                  fontWeight: FontWeight.w600,
+            return InkWell(
+              onTap: () => _showWorkerSearchDialog(context, docs),
+              child: InputDecorator(
+                decoration: _inputStyle('Trabajador', Icons.person_outline),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        displayText,
+                        style: TextStyle(
+                          color: _selectedWorkerId == null ? _textSecondary : _textMain,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Icon(Icons.arrow_drop_down, color: _textSecondary),
+                  ],
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            const Icon(Icons.arrow_drop_down, color: _textSecondary),
-          ],
+            );
+          },
         ),
-      ),
-    );
-  },
-),
       ],
     );
   }
 
+  // ===========================
+  // ANALYTICS
+  // ===========================
   Widget _buildAnalyticsDashboard() {
     final stream = _db
         .collection('empresas')
@@ -652,23 +654,20 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         final paid = docs.where((d) => d.data()['pagado'] == true).length;
         final pending = total - paid;
 
-        // roles distribution
         final roleCounts = <String, int>{};
         for (final d in docs) {
           final r = (d.data()['trabajadorRol'] ?? 'Staff').toString().trim();
           roleCounts[r] = (roleCounts[r] ?? 0) + 1;
         }
-        final sortedRoles = roleCounts.entries.toList()
-          ..sort((a, b) => b.value.compareTo(a.value));
+        final sortedRoles = roleCounts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
-        // payment time series (by day, last 14)
         final now = DateTime.now();
         final days = List.generate(14, (i) {
           final dt = DateTime(now.year, now.month, now.day).subtract(Duration(days: 13 - i));
           return dt;
         });
 
-        final paidByDay = <DateTime, int>{ for (final d in days) d: 0 };
+        final paidByDay = <DateTime, int>{for (final d in days) d: 0};
         for (final doc in docs) {
           final data = doc.data();
           if (data['pagado'] != true) continue;
@@ -743,7 +742,6 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               ),
             ),
             const SizedBox(height: 12),
-
             LayoutBuilder(
               builder: (context, c) {
                 final isWide = c.maxWidth >= 900;
@@ -781,18 +779,8 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
     final sections = total == 0
         ? <PieChartSectionData>[]
         : [
-            PieChartSectionData(
-              value: paid.toDouble(),
-              title: '',
-              color: _ok,
-              radius: 26,
-            ),
-            PieChartSectionData(
-              value: pending.toDouble(),
-              title: '',
-              color: _bad,
-              radius: 26,
-            ),
+            PieChartSectionData(value: paid.toDouble(), title: '', color: _ok, radius: 26),
+            PieChartSectionData(value: pending.toDouble(), title: '', color: _bad, radius: 26),
           ];
 
     return _CardShell(
@@ -826,13 +814,7 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  PieChart(
-                    PieChartData(
-                      centerSpaceRadius: 44,
-                      sectionsSpace: 2,
-                      sections: sections,
-                    ),
-                  ),
+                  PieChart(PieChartData(centerSpaceRadius: 44, sectionsSpace: 2, sections: sections)),
                   Text(
                     total == 0 ? '—' : '${((paid / total) * 100).round()}%',
                     style: const TextStyle(fontWeight: FontWeight.w900, color: _textMain),
@@ -920,7 +902,7 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                       ),
                       const SizedBox(height: 6),
                       LinearProgressIndicator(
-                        value: (v).toDouble(),
+                        value: v.toDouble(),
                         minHeight: 8,
                         backgroundColor: const Color(0xFFEFF6FF),
                         valueColor: const AlwaysStoppedAnimation(_accent),
@@ -955,86 +937,132 @@ StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       'pagadoEn': status ? FieldValue.serverTimestamp() : null,
     });
   }
-void _showWorkerSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs) {
-  showDialog(
-    context: context,
-    builder: (context) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          // 1. Filtramos primero para quitar los que no tienen nombre 
-          // 2. Filtramos por el término de búsqueda
-          final filteredDocs = allDocs.where((doc) {
-            final data = doc.data();
-            final nombre = (data['nombre'] ?? '').toString().trim();
-            final apellidos = (data['apellidos'] ?? '').toString().trim();
-            final full = '$nombre $apellidos'.trim();
 
-            // Solo incluimos si el nombre NO está vacío
-            if (full.isEmpty) return false;
+  void _showWorkerSearchDialog(
+    BuildContext context,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs,
+  ) {
+    _workerSearchTerm = '';
 
-            // Filtro de búsqueda
-            return full.toLowerCase().contains(_workerSearchTerm.toLowerCase());
-          }).toList();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            String displayName(Map<String, dynamic> data, String docId) {
+              final nombre = (data['nombre'] ?? '').toString().trim();
+              final apellidos = (data['apellidos'] ?? '').toString().trim();
+              final full = '$nombre $apellidos'.trim();
+              if (full.isNotEmpty) return full;
 
-          return AlertDialog(
-            title: const Text("Buscar Trabajador", style: TextStyle(fontWeight: FontWeight.w900)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-            content: SizedBox(
-              width: MediaQuery.of(context).size.width * 0.8, // Un poco más ancho para ver bien los nombres
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    decoration: _inputStyle('Escribe nombre o apellido...', Icons.search),
-                    onChanged: (value) {
-                      setDialogState(() => _workerSearchTerm = value);
-                    },
-                  ),
-                  const SizedBox(height: 15),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
-                    child: filteredDocs.isEmpty 
-                      ? const Padding(
-                          padding: EdgeInsets.all(20),
-                          child: Text("No se encontraron trabajadores con nombre configurado"),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: filteredDocs.length,
-                          itemBuilder: (context, i) {
-                            final data = filteredDocs[i].data();
-                            final nombre = (data['nombre'] ?? '').toString();
-                            final apellidos = (data['apellidos'] ?? '').toString();
-                            final full = '$nombre $apellidos'.trim();
+              final email = (data['email'] ?? '').toString().trim();
+              if (email.isNotEmpty) return 'Sin nombre • $email';
 
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: _accent.withOpacity(0.1),
-                                child: Text(nombre.isNotEmpty ? nombre[0].toUpperCase() : "?", 
-                                  style: const TextStyle(color: _accent, fontWeight: FontWeight.bold)),
-                              ),
-                              title: Text(full, style: const TextStyle(fontWeight: FontWeight.w700)),
-                              onTap: () {
-                                setState(() {
-                                  _selectedWorkerId = filteredDocs[i].id;
-                                  _selectedWorkerName = full;
-                                  _workerSearchTerm = '';
-                                });
-                                Navigator.pop(context);
+              final uid = (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().trim();
+              if (uid.isNotEmpty) {
+                final cut = uid.substring(0, uid.length > 6 ? 6 : uid.length);
+                return 'Sin nombre • uid:$cut';
+              }
+
+              return 'Sin nombre • id:$docId';
+            }
+
+            bool matchesSearch(String shown, Map<String, dynamic> data, String docId) {
+              final q = _workerSearchTerm.trim().toLowerCase();
+              if (q.isEmpty) return true;
+
+              final nombre = (data['nombre'] ?? '').toString().toLowerCase();
+              final apellidos = (data['apellidos'] ?? '').toString().toLowerCase();
+              final email = (data['email'] ?? '').toString().toLowerCase();
+              final uid = (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().toLowerCase();
+
+              return shown.toLowerCase().contains(q) ||
+                  nombre.contains(q) ||
+                  apellidos.contains(q) ||
+                  email.contains(q) ||
+                  uid.contains(q) ||
+                  docId.toLowerCase().contains(q);
+            }
+
+            final filtered = allDocs.where((doc) {
+              final data = doc.data();
+              final shown = displayName(data, doc.id);
+              return matchesSearch(shown, data, doc.id);
+            }).toList()
+              ..sort((a, b) {
+                final sa = displayName(a.data(), a.id).toLowerCase();
+                final sb = displayName(b.data(), b.id).toLowerCase();
+                return sa.compareTo(sb);
+              });
+
+            return AlertDialog(
+              title: const Text("Buscar Trabajador", style: TextStyle(fontWeight: FontWeight.w900)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+              content: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.86,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      decoration: _inputStyle('Nombre, email o id...', Icons.search),
+                      onChanged: (value) => setDialogState(() => _workerSearchTerm = value),
+                    ),
+                    const SizedBox(height: 15),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.55),
+                      child: filtered.isEmpty
+                          ? const Padding(
+                              padding: EdgeInsets.all(20),
+                              child: Text("No se encontraron resultados"),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filtered.length,
+                              itemBuilder: (context, i) {
+                                final doc = filtered[i];
+                                final data = doc.data();
+
+                                final shown = displayName(data, doc.id);
+                                final nombre = (data['nombre'] ?? '').toString().trim();
+                                final letter = (nombre.isNotEmpty ? nombre[0] : '•').toUpperCase();
+
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: _accent.withOpacity(0.1),
+                                    child: Text(
+                                      letter,
+                                      style: const TextStyle(color: _accent, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  title: Text(shown, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                  subtitle: Text('docId: ${doc.id}', style: const TextStyle(fontSize: 12)),
+                                  onTap: () {
+                                    setState(() {
+                                      _selectedWorkerId = doc.id;
+                                      _selectedWorkerName = shown;
+
+                                      _selectedWorkerUid =
+                                          (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().trim();
+                                      _selectedWorkerEmail = (data['email'] ?? '').toString().trim();
+
+                                      _workerSearchTerm = '';
+                                    });
+                                    Navigator.pop(context);
+                                  },
+                                );
                               },
-                            );
-                          },
-                        ),
-                  ),
-                ],
+                            ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
-      );
-    },
-  );
-}
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _exportEventoPdf() async {
     if (_empresaId == null || _selectedEventoId == null) return;
 
@@ -1087,11 +1115,14 @@ void _showWorkerSearchDialog(BuildContext context, List<QueryDocumentSnapshot<Ma
 
     setState(() => _isGenerating = true);
     try {
+      // ✅ firma nueva (docId + uid + email opcional)
       final bytes = await AdminReports.buildActividadTrabajadorGlobal(
         db: _db,
         empresaId: _empresaId!,
-        trabajadorId: _selectedWorkerId!,
+        trabajadorDocId: _selectedWorkerId!,
         trabajadorNombre: _selectedWorkerName!,
+        trabajadorUid: _selectedWorkerUid,
+        trabajadorEmail: _selectedWorkerEmail,
       );
       await Printing.layoutPdf(onLayout: (_) => bytes);
     } catch (e) {

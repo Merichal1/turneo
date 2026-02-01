@@ -26,6 +26,212 @@ class AdminHomeScreen extends StatelessWidget {
   DateTime _monthStart(DateTime now) => DateTime(now.year, now.month, 1);
   DateTime _monthEnd(DateTime now) => DateTime(now.year, now.month + 1, 1);
 
+  // ==========================
+  // PENDIENTES DE PAGO (GLOBAL + DETALLE POR EVENTO)
+  // ==========================
+  Stream<_PendingPaymentsSummary> _getPagosPendientesSummaryStream(String empresaId) {
+    final db = FirebaseFirestore.instance;
+
+    // Si quieres limitar el cálculo a eventos “recientes” para rendimiento:
+    // final from = DateTime.now().subtract(const Duration(days: 365)); // 1 año
+    // y filtras por fechaInicio >= from.
+    return db
+        .collection('empresas')
+        .doc(empresaId)
+        .collection('eventos')
+        .snapshots()
+        .asyncMap((eventosSnap) async {
+      int totalPendientes = 0;
+      final List<_EventPending> detalle = [];
+
+      for (final evDoc in eventosSnap.docs) {
+        final evData = evDoc.data();
+        final estado = (evData['estado'] ?? '').toString().toLowerCase();
+        if (estado == 'cancelado') continue; // ✅ no contamos cancelados
+
+        final String nombre = (evData['nombre'] ?? 'Evento sin nombre').toString();
+
+        // Fecha (para mostrar)
+        DateTime? fechaInicio;
+        final rawFecha = evData['fechaInicio'];
+        if (rawFecha is Timestamp) fechaInicio = rawFecha.toDate();
+
+        // Contamos pendientes en ESTE evento:
+        // asistio==true && pagado==false
+        final dispSnap = await evDoc.reference
+            .collection('disponibilidad')
+            .where('asistio', isEqualTo: true)
+            .where('pagado', isEqualTo: false)
+            .get();
+
+        final count = dispSnap.docs.length;
+        if (count > 0) {
+          totalPendientes += count;
+          detalle.add(_EventPending(
+            eventoId: evDoc.id,
+            nombre: nombre,
+            fechaInicio: fechaInicio,
+            pendientes: count,
+          ));
+        }
+      }
+
+      // Ordenamos por más pendientes, y si empata por fecha más reciente
+      detalle.sort((a, b) {
+        final c = b.pendientes.compareTo(a.pendientes);
+        if (c != 0) return c;
+        final da = a.fechaInicio ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dbb = b.fechaInicio ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return dbb.compareTo(da);
+      });
+
+      return _PendingPaymentsSummary(
+        total: totalPendientes,
+        porEvento: detalle,
+      );
+    });
+  }
+
+  void _showPendientesDetalleModal(BuildContext context, _PendingPaymentsSummary summary) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) {
+        final items = summary.porEvento;
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 18,
+            right: 18,
+            top: 18,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 18,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header
+              Row(
+                children: [
+                  const Icon(Icons.receipt_long_outlined, color: _blue),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Pendientes de pago (detalle)',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _blue.withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: _blue.withOpacity(0.2)),
+                    ),
+                    child: Text(
+                      '${summary.total} total',
+                      style: const TextStyle(fontWeight: FontWeight.w900, color: _blue),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+
+              if (items.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 18),
+                  child: Text(
+                    'No hay pagos pendientes 🎉',
+                    style: TextStyle(fontWeight: FontWeight.w800, color: _textGrey),
+                  ),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(ctx).size.height * 0.65,
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: items.length,
+                    separatorBuilder: (_, __) => const Divider(height: 16),
+                    itemBuilder: (_, i) {
+                      final e = items[i];
+                      final dateTxt = (e.fechaInicio == null)
+                          ? '—'
+                          : DateFormat('dd/MM/yyyy', 'es_ES').format(e.fechaInicio!);
+
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFFBEB),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B)),
+                        ),
+                        title: Text(
+                          e.nombre,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                        subtitle: Text(
+                          'Fecha: $dateTxt',
+                          style: const TextStyle(color: _textGrey, fontWeight: FontWeight.w600),
+                        ),
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFFBEB),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: Text(
+                            '${e.pendientes} pendientes',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFFF59E0B),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        // Si quieres, aquí puedes navegar a tu pantalla de pagos (si tienes ruta).
+                        // onTap: () => Navigator.pop(ctx),
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 14),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('CERRAR', style: TextStyle(fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final String empresaId = AppConfig.empresaId;
@@ -59,29 +265,18 @@ class AdminHomeScreen extends StatelessWidget {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final trabajadores = trabajadoresSnap.data!;
-                final trabajadoresActivos = trabajadores.length;
+                final trabajadoresActivos = trabajadoresSnap.data!.length;
 
-                final unreadStream = FirebaseFirestore.instance
-                    .collection('empresas')
-                    .doc(empresaId)
-                    .collection('notificaciones')
-                    .where('leido', isEqualTo: false)
-                    .snapshots();
-
-                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: unreadStream,
-                  builder: (context, unreadSnap) {
-                    final pendientes = unreadSnap.data?.docs.length ?? 0;
+                return StreamBuilder<_PendingPaymentsSummary>(
+                  stream: _getPagosPendientesSummaryStream(empresaId),
+                  builder: (context, pagosSnap) {
+                    final summary = pagosSnap.data ?? const _PendingPaymentsSummary(total: 0, porEvento: []);
 
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         final isCompact = constraints.maxWidth < 800;
                         final padding = EdgeInsets.all(isCompact ? 16.0 : 24.0);
 
-                        // -----------------------------
-                        // MOBILE / COMPACT
-                        // -----------------------------
                         if (isCompact) {
                           return SingleChildScrollView(
                             padding: padding,
@@ -91,10 +286,7 @@ class AdminHomeScreen extends StatelessWidget {
                                 const SizedBox(height: 4),
                                 Text(
                                   'Panel Principal',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineSmall
-                                      ?.copyWith(
+                                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                                         fontWeight: FontWeight.w900,
                                         color: _textDark,
                                       ),
@@ -102,10 +294,7 @@ class AdminHomeScreen extends StatelessWidget {
                                 const SizedBox(height: 6),
                                 Text(
                                   'Resumen de actividad y accesos rápidos',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyMedium
-                                      ?.copyWith(color: _textGrey),
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: _textGrey),
                                 ),
                                 const SizedBox(height: 18),
 
@@ -125,9 +314,12 @@ class AdminHomeScreen extends StatelessWidget {
                                 const SizedBox(height: 12),
                                 _SummaryCard(
                                   title: 'Pendientes de pago',
-                                  value: '$pendientes',
-                                  icon: Icons.notifications_active_outlined,
+                                  value: '${summary.total}',
+                                  icon: Icons.payments_outlined,
                                   expand: false,
+                                  infoTooltip: 'Pulsa para ver detalle por evento',
+                                  onInfoTap: () => _showPendientesDetalleModal(context, summary),
+                                  onTap: () => _showPendientesDetalleModal(context, summary),
                                 ),
 
                                 const SizedBox(height: 22),
@@ -187,9 +379,7 @@ class AdminHomeScreen extends StatelessWidget {
                           );
                         }
 
-                        // -----------------------------
                         // WEB / DESKTOP
-                        // -----------------------------
                         return Padding(
                           padding: padding,
                           child: Column(
@@ -225,8 +415,11 @@ class AdminHomeScreen extends StatelessWidget {
                                   const SizedBox(width: 16),
                                   _SummaryCard(
                                     title: 'Pendientes de pago',
-                                    value: '$pendientes',
-                                    icon: Icons.notifications_active_outlined,
+                                    value: '${summary.total}',
+                                    icon: Icons.payments_outlined,
+                                    infoTooltip: 'Pulsa para ver detalle por evento',
+                                    onInfoTap: () => _showPendientesDetalleModal(context, summary),
+                                    onTap: () => _showPendientesDetalleModal(context, summary),
                                   ),
                                 ],
                               ),
@@ -311,17 +504,51 @@ class AdminHomeScreen extends StatelessWidget {
   }
 }
 
+// ===========================
+// MODELOS INTERNOS
+// ===========================
+class _PendingPaymentsSummary {
+  final int total;
+  final List<_EventPending> porEvento;
+  const _PendingPaymentsSummary({required this.total, required this.porEvento});
+}
+
+class _EventPending {
+  final String eventoId;
+  final String nombre;
+  final DateTime? fechaInicio;
+  final int pendientes;
+  const _EventPending({
+    required this.eventoId,
+    required this.nombre,
+    required this.fechaInicio,
+    required this.pendientes,
+  });
+}
+
+// ===========================
+// WIDGETS (tus widgets + mini mejora para “info” y onTap)
+// ===========================
+
 class _SummaryCard extends StatelessWidget {
   final String title;
   final String value;
   final IconData icon;
   final bool expand;
 
+  // NUEVO:
+  final VoidCallback? onTap;
+  final VoidCallback? onInfoTap;
+  final String? infoTooltip;
+
   const _SummaryCard({
     required this.title,
     required this.value,
     required this.icon,
     this.expand = true,
+    this.onTap,
+    this.onInfoTap,
+    this.infoTooltip,
   });
 
   static const Color _card = Colors.white;
@@ -332,7 +559,7 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = Container(
+    final content = Container(
       height: 96,
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -366,12 +593,32 @@ class _SummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: _textGrey,
-                        fontWeight: FontWeight.w600,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: _textGrey,
+                              fontWeight: FontWeight.w600,
+                            ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                    ),
+                    if (onInfoTap != null)
+                      Tooltip(
+                        message: infoTooltip ?? 'Info',
+                        child: InkWell(
+                          onTap: onInfoTap,
+                          borderRadius: BorderRadius.circular(999),
+                          child: const Padding(
+                            padding: EdgeInsets.all(6),
+                            child: Icon(Icons.info_outline, size: 18, color: _textGrey),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -388,8 +635,16 @@ class _SummaryCard extends StatelessWidget {
       ),
     );
 
-    if (expand) return Expanded(child: card);
-    return card;
+    final wrapped = (onTap != null)
+        ? InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onTap,
+            child: content,
+          )
+        : content;
+
+    if (expand) return Expanded(child: wrapped);
+    return wrapped;
   }
 }
 
@@ -454,6 +709,7 @@ class _QuickActionButton extends StatelessWidget {
   }
 }
 
+// ====== Esto ya lo tenías, lo dejo igual ======
 class _UpcomingEventsCard extends StatelessWidget {
   const _UpcomingEventsCard({
     required this.empresaId,
