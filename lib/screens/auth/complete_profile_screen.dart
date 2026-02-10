@@ -176,6 +176,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                         DropdownMenuItem(value: 'cocinero', child: Text('Cocinero')),
                         DropdownMenuItem(value: 'logistica', child: Text('Logística')),
                         DropdownMenuItem(value: 'limpiador', child: Text('Limpiador')),
+                        DropdownMenuItem(value: 'metre', child: Text('metre')),
+
                       ],
                       onChanged: (v) => setState(() => _puesto = v ?? 'camarero'),
                     ),

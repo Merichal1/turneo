@@ -474,7 +474,6 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                   style: TextStyle(color: _textSecondary, fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 14),
-
                 LayoutBuilder(
                   builder: (context, c) {
                     final isWide = c.maxWidth >= 860;
@@ -522,7 +521,6 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                     );
                   },
                 ),
-
                 const SizedBox(height: 14),
                 _buildReportSelectors(),
               ],
@@ -938,6 +936,9 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
     });
   }
 
+  // ===========================
+  // ✅ WORKER SEARCH DIALOG (CORREGIDO: usa perfil.nombre, perfil.apellidos, perfil.correo)
+  // ===========================
   void _showWorkerSearchDialog(
     BuildContext context,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs,
@@ -950,19 +951,18 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
         return StatefulBuilder(
           builder: (context, setDialogState) {
             String displayName(Map<String, dynamic> data, String docId) {
-              final nombre = (data['nombre'] ?? '').toString().trim();
-              final apellidos = (data['apellidos'] ?? '').toString().trim();
+              final perfil = (data['perfil'] as Map<String, dynamic>?) ?? const {};
+
+              final nombre = (perfil['nombre'] ?? '').toString().trim();
+              final apellidos = (perfil['apellidos'] ?? '').toString().trim();
               final full = '$nombre $apellidos'.trim();
               if (full.isNotEmpty) return full;
 
-              final email = (data['email'] ?? '').toString().trim();
-              if (email.isNotEmpty) return 'Sin nombre • $email';
+              final correo = (perfil['correo'] ?? '').toString().trim();
+              if (correo.isNotEmpty) return 'Sin nombre • $correo';
 
-              final uid = (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().trim();
-              if (uid.isNotEmpty) {
-                final cut = uid.substring(0, uid.length > 6 ? 6 : uid.length);
-                return 'Sin nombre • uid:$cut';
-              }
+              final nombreLower = (data['nombre_lower'] ?? '').toString().trim();
+              if (nombreLower.isNotEmpty) return nombreLower;
 
               return 'Sin nombre • id:$docId';
             }
@@ -971,15 +971,20 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
               final q = _workerSearchTerm.trim().toLowerCase();
               if (q.isEmpty) return true;
 
-              final nombre = (data['nombre'] ?? '').toString().toLowerCase();
-              final apellidos = (data['apellidos'] ?? '').toString().toLowerCase();
-              final email = (data['email'] ?? '').toString().toLowerCase();
+              final perfil = (data['perfil'] as Map<String, dynamic>?) ?? const {};
+
+              final nombre = (perfil['nombre'] ?? '').toString().toLowerCase();
+              final apellidos = (perfil['apellidos'] ?? '').toString().toLowerCase();
+              final correo = (perfil['correo'] ?? '').toString().toLowerCase();
+
               final uid = (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().toLowerCase();
+              final nombreLower = (data['nombre_lower'] ?? '').toString().toLowerCase();
 
               return shown.toLowerCase().contains(q) ||
                   nombre.contains(q) ||
                   apellidos.contains(q) ||
-                  email.contains(q) ||
+                  correo.contains(q) ||
+                  nombreLower.contains(q) ||
                   uid.contains(q) ||
                   docId.toLowerCase().contains(q);
             }
@@ -1022,20 +1027,30 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
                                 final doc = filtered[i];
                                 final data = doc.data();
 
+                                final perfil = (data['perfil'] as Map<String, dynamic>?) ?? const {};
+                                final nombre = (perfil['nombre'] ?? '').toString().trim();
+                                final apellidos = (perfil['apellidos'] ?? '').toString().trim();
+                                final correo = (perfil['correo'] ?? '').toString().trim();
+
                                 final shown = displayName(data, doc.id);
-                                final nombre = (data['nombre'] ?? '').toString().trim();
-                                final letter = (nombre.isNotEmpty ? nombre[0] : '•').toUpperCase();
+
+                                final initial = nombre.isNotEmpty
+                                    ? nombre[0]
+                                    : (apellidos.isNotEmpty ? apellidos[0] : (correo.isNotEmpty ? correo[0] : '?'));
 
                                 return ListTile(
                                   leading: CircleAvatar(
                                     backgroundColor: _accent.withOpacity(0.1),
                                     child: Text(
-                                      letter,
+                                      initial.toUpperCase(),
                                       style: const TextStyle(color: _accent, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                   title: Text(shown, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                  subtitle: Text('docId: ${doc.id}', style: const TextStyle(fontSize: 12)),
+                                  subtitle: Text(
+                                    correo.isNotEmpty ? correo : 'id: ${doc.id}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
                                   onTap: () {
                                     setState(() {
                                       _selectedWorkerId = doc.id;
@@ -1043,7 +1058,9 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
                                       _selectedWorkerUid =
                                           (data['uid'] ?? data['authUid'] ?? data['userId'] ?? '').toString().trim();
-                                      _selectedWorkerEmail = (data['email'] ?? '').toString().trim();
+
+                                      // ✅ email correcto desde perfil
+                                      _selectedWorkerEmail = correo;
 
                                       _workerSearchTerm = '';
                                     });
@@ -1115,7 +1132,6 @@ class _AdminPaymentsHistoryScreenState extends State<AdminPaymentsHistoryScreen>
 
     setState(() => _isGenerating = true);
     try {
-      // ✅ firma nueva (docId + uid + email opcional)
       final bytes = await AdminReports.buildActividadTrabajadorGlobal(
         db: _db,
         empresaId: _empresaId!,

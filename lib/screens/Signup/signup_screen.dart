@@ -326,10 +326,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
                             value: _accountType,
-                            isExpanded: true,
+                            isExpanded: false,
                             items: const [
                               DropdownMenuItem(value: 'Trabajador', child: Text('Trabajador')),
-                              DropdownMenuItem(value: 'Administrador', child: Text('Administrador')),
                             ],
                             onChanged: (v) => setState(() => _accountType = v ?? 'Trabajador'),
                           ),

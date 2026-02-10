@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:turneo/screens/auth/turneo_start_screen.dart';
 
 import 'admin_home_screen.dart';
 import 'admin_events_screen.dart';
@@ -23,19 +24,10 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   bool _signingOut = false;
 
   Future<void> _signOut({BuildContext? closeDrawerContext}) async {
-    if (_signingOut) return;
-    setState(() => _signingOut = true);
-
-    try {
-      // Cierra el drawer si estamos en modo móvil
-      if (closeDrawerContext != null) {
-        Navigator.of(closeDrawerContext).pop();
-      }
-      // AuthGate se encargará de mostrar Login cuando no haya user
-      await FirebaseAuth.instance.signOut();
-    } finally {
-      if (mounted) setState(() => _signingOut = false);
-    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const TurneoStartScreen()),
+      (route) => false,
+    );
   }
 
   // ✅ Mantiene estado de cada pantalla

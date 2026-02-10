@@ -5,9 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:turneo/screens/auth/turneo_start_screen.dart';
+
 import '../Login/login_screen.dart';
-
-
 import '../../config/app_config.dart';
 
 class WorkerProfileScreen extends StatefulWidget {
@@ -64,89 +64,61 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
     return s.isEmpty ? '—' : s;
   }
 
-  String _rolesToText(dynamic roles, dynamic rolFallback) {
-    if (roles is List) {
-      final cleaned = roles
-          .map((e) => e.toString().trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      return cleaned.isEmpty ? '—' : cleaned.join(' / ');
-    }
-    if (roles is String && roles.trim().isNotEmpty) return roles.trim();
-    if (rolFallback is String && rolFallback.trim().isNotEmpty) {
-      return rolFallback.trim();
-    }
-    return '—';
-  }
-
-  String _formatBirth(dynamic ts) {
-    if (ts is Timestamp) {
-      final d = ts.toDate();
-      final dd = d.day.toString().padLeft(2, '0');
-      final mm = d.month.toString().padLeft(2, '0');
-      final yy = d.year.toString();
-      return '$dd/$mm/$yy';
-    }
-    return '—';
-  }
-
   DateTime? _birthToDate(dynamic ts) {
     if (ts is Timestamp) return ts.toDate();
     return null;
   }
 
   Future<void> _confirmAndLogout() async {
-  final bool? ok = await showDialog<bool>(
-    context: context,
-    barrierDismissible: true,
-    builder: (ctx) => AlertDialog(
-      title: const Text(
-        'Cerrar sesión',
-        style: TextStyle(fontWeight: FontWeight.w900),
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AlertDialog(
+        title: const Text(
+          'Cerrar sesión',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        content: const Text('¿Estás seguro de que quieres cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              elevation: 0,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Sí, salir',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
       ),
-      content: const Text('¿Estás seguro de que quieres cerrar sesión?'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFDC2626),
-            foregroundColor: Colors.white,
-            elevation: 0,
-          ),
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text(
-            'Sí, salir',
-            style: TextStyle(fontWeight: FontWeight.w900),
-          ),
-        ),
-      ],
-    ),
-  );
+    );
 
-  if (ok != true) return;
+    if (ok != true) return;
 
-  try {
-    await FirebaseAuth.instance.signOut();
-  } catch (_) {}
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (_) {}
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  Navigator.of(context).pushAndRemoveUntil(
-    MaterialPageRoute(builder: (_) => const LoginScreenModern()),
-    (route) => false,
-  );
-}
-
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const TurneoStartScreen()),
+      (route) => false,
+    );
+  }
 
   Future<void> _changePhoto({
     required BuildContext context,
     required String uid,
     required DocumentReference<Map<String, dynamic>> ref,
   }) async {
-    // 1) Preguntar al usuario si cámara o galería
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: Colors.white,
@@ -199,7 +171,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
     try {
       setState(() => _uploadingPhoto = true);
 
-      // 2) Elegir/capturar imagen
       final XFile? picked = await _picker.pickImage(
         source: source,
         imageQuality: 82,
@@ -211,7 +182,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
         return;
       }
 
-      // 3) Subir a Storage
       final Uint8List bytes = await picked.readAsBytes();
       final photoRef = _workerPhotoRef(uid);
 
@@ -222,7 +192,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
 
       final url = await photoRef.getDownloadURL();
 
-      // 4) Guardar url en Firestore (campo: photoUrl)
       await ref.set(
         {
           'photoUrl': url,
@@ -249,6 +218,18 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
+    // Seguridad: si no hay empresaId seteado, no podemos leer el documento
+    if (AppConfig.empresaId.trim().isEmpty) {
+      return const SafeArea(
+        child: Scaffold(
+          backgroundColor: _bg,
+          body: Center(
+            child: Text('No se ha encontrado la empresa del usuario.'),
+          ),
+        ),
+      );
+    }
+
     if (user == null) {
       return const SafeArea(
         child: Scaffold(
@@ -270,23 +251,63 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final data = snap.data?.data() ?? <String, dynamic>{};
+            if (snap.hasError) {
+              return Center(child: Text('Error: ${snap.error}'));
+            }
 
-            final nombre = _safeText(data['nombre']);
-            final apellidos = _safeText(data['apellidos']);
-            final fullName =
-                (('$nombre $apellidos').trim().replaceAll(RegExp(r'\s+'), ' '));
-            final displayName =
-                (fullName.trim().isEmpty || fullName == '— —') ? '—' : fullName;
+            if (!snap.hasData || !snap.data!.exists) {
+              return const Center(child: Text('No existe perfil de trabajador.'));
+            }
 
-            final rolesText = _rolesToText(data['roles'], data['rol']);
+            final data = snap.data!.data() ?? <String, dynamic>{};
+
+            // ✅ TU ESTRUCTURA REAL EN FIRESTORE
+            final perfil = (data['perfil'] is Map)
+                ? Map<String, dynamic>.from(data['perfil'] as Map)
+                : <String, dynamic>{};
+
+            final laboral = (data['laboral'] is Map)
+                ? Map<String, dynamic>.from(data['laboral'] as Map)
+                : <String, dynamic>{};
+
+            // ---------- PERFIL ----------
+            final nombre = _safeText(perfil['nombre']);
+            final apellidos = _safeText(perfil['apellidos']);
+            final ciudad = _safeText(perfil['ciudad']);
+            final telefono = _safeText(perfil['telefono']);
+            final dni = _safeText(perfil['dni']);
+
+            // Email: prefiero el de Auth, pero si no existe uso perfil['correo']
+            final authEmail = (user.email ?? '').trim();
+            final email = authEmail.isNotEmpty ? authEmail : _safeText(perfil['correo']);
+
+            // ---------- LABORAL ----------
+            final puesto = _safeText(laboral['puesto']);
+
+            final edadVal = laboral['edad'];
+            final edad = (edadVal is num) ? edadVal.toInt().toString() : _safeText(edadVal);
+
+            // En Firestore tienes "añosExperiencia" (con ñ). Por seguridad, acepto ambos.
+            final expVal = laboral['añosExperiencia'] ?? laboral['aniosExperiencia'];
+            final exp = (expVal is num) ? expVal.toInt().toString() : _safeText(expVal);
+
+            final bool tieneVehiculo = (laboral['tieneVehiculo'] is bool)
+                ? laboral['tieneVehiculo'] as bool
+                : false;
+
+            // Empresa (en tu doc no veo empresaNombre, así que mostramos fallback)
             final empresaNombre = _safeText(data['empresaNombre']);
 
-            final email =
-                (user.email ?? '').trim().isEmpty ? '—' : user.email!.trim();
-            final telefono = _safeText(data['telefono']);
-            final dni = _safeText(data['dni']);
-            final nacimiento = _formatBirth(data['fechaNacimiento']);
+            final displayNameRaw = (('$nombre $apellidos')
+                .trim()
+                .replaceAll(RegExp(r'\s+'), ' '));
+            final displayName =
+                (displayNameRaw.trim().isEmpty || displayNameRaw == '— —')
+                    ? '—'
+                    : displayNameRaw;
+
+            // Roles: en tu doc el rol real es "puesto"
+            final rolesText = puesto == '—' ? '—' : puesto;
 
             final bool notificacionesPush = (data['notificacionesPush'] is bool)
                 ? data['notificacionesPush'] as bool
@@ -295,7 +316,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
             final photoUrl = (data['photoUrl'] ?? '').toString().trim();
             final initials = _initialsFromName(
               displayName == '—' ? '' : displayName,
-              user.email ?? '',
+              email,
             );
 
             return SingleChildScrollView(
@@ -303,7 +324,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ===== Header =====
                   const Text(
                     'Perfil',
                     style: TextStyle(
@@ -422,9 +442,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                empresaNombre == '—'
-                                    ? 'Mi empresa'
-                                    : empresaNombre,
+                                empresaNombre == '—' ? 'Mi empresa' : empresaNombre,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -469,14 +487,19 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                         value: telefono,
                       ),
                       _ProfileRow(
+                        icon: Icons.location_city_outlined,
+                        label: 'Ciudad',
+                        value: ciudad,
+                      ),
+                      _ProfileRow(
                         icon: Icons.credit_card_outlined,
                         label: 'DNI / NIE',
                         value: dni,
                       ),
                       _ProfileRow(
                         icon: Icons.cake_outlined,
-                        label: 'Nacimiento',
-                        value: nacimiento,
+                        label: 'Edad',
+                        value: edad == '—' ? '—' : '$edad años',
                       ),
                     ],
                   ),
@@ -490,15 +513,18 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                     children: [
                       _ProfileRow(
                         icon: Icons.work_outline,
-                        label: 'Rol principal',
-                        value: rolesText == '—'
-                            ? '—'
-                            : rolesText.split(' / ').first,
+                        label: 'Puesto',
+                        value: puesto,
                       ),
                       _ProfileRow(
-                        icon: Icons.layers_outlined,
-                        label: 'Roles',
-                        value: rolesText,
+                        icon: Icons.timeline_outlined,
+                        label: 'Experiencia',
+                        value: exp == '—' ? '—' : '$exp años',
+                      ),
+                      _ProfileRow(
+                        icon: Icons.directions_car_outlined,
+                        label: 'Vehículo propio',
+                        value: tieneVehiculo ? 'Sí' : 'No',
                       ),
                     ],
                   ),
@@ -530,7 +556,8 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text(
-                                    'Te envié un email para cambiar la contraseña.'),
+                                  'Te envié un email para cambiar la contraseña.',
+                                ),
                               ),
                             );
                           }
@@ -584,7 +611,7 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                        onPressed: _confirmAndLogout,
+                          onPressed: _confirmAndLogout,
                           icon: const Icon(Icons.logout, size: 18),
                           label: const Text(
                             'Cerrar sesión',
@@ -617,31 +644,32 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
     required Map<String, dynamic> existing,
     required String email,
   }) async {
-    final nombreCtrl =
-        TextEditingController(text: (existing['nombre'] ?? '').toString());
-    final apellidosCtrl =
-        TextEditingController(text: (existing['apellidos'] ?? '').toString());
-    final telefonoCtrl =
-        TextEditingController(text: (existing['telefono'] ?? '').toString());
-    final dniCtrl =
-        TextEditingController(text: (existing['dni'] ?? '').toString());
-    final empresaCtrl = TextEditingController(
-        text: (existing['empresaNombre'] ?? '').toString());
+    // ✅ Leer desde tu estructura real (perfil/laboral) para precargar
+    final perfil = (existing['perfil'] is Map)
+        ? Map<String, dynamic>.from(existing['perfil'] as Map)
+        : <String, dynamic>{};
 
-    String rolesText;
-    final rolesExisting = existing['roles'];
-    if (rolesExisting is List) {
-      rolesText = rolesExisting.map((e) => e.toString()).join(', ');
-    } else if (rolesExisting is String) {
-      rolesText = rolesExisting;
-    } else if (existing['rol'] is String) {
-      rolesText = existing['rol'];
-    } else {
-      rolesText = '';
-    }
-    final rolesCtrl = TextEditingController(text: rolesText);
+    final laboral = (existing['laboral'] is Map)
+        ? Map<String, dynamic>.from(existing['laboral'] as Map)
+        : <String, dynamic>{};
 
-    DateTime? birth = _birthToDate(existing['fechaNacimiento']);
+    final nombreCtrl = TextEditingController(text: (perfil['nombre'] ?? '').toString());
+    final apellidosCtrl = TextEditingController(text: (perfil['apellidos'] ?? '').toString());
+    final telefonoCtrl = TextEditingController(text: (perfil['telefono'] ?? '').toString());
+    final dniCtrl = TextEditingController(text: (perfil['dni'] ?? '').toString());
+    final ciudadCtrl = TextEditingController(text: (perfil['ciudad'] ?? '').toString());
+
+    final puestoCtrl = TextEditingController(text: (laboral['puesto'] ?? '').toString());
+    final expCtrl = TextEditingController(
+      text: (laboral['añosExperiencia'] ?? laboral['aniosExperiencia'] ?? '').toString(),
+    );
+    final edadCtrl = TextEditingController(text: (laboral['edad'] ?? '').toString());
+
+    bool tieneVehiculo = (laboral['tieneVehiculo'] is bool)
+        ? laboral['tieneVehiculo'] as bool
+        : false;
+
+    DateTime? birth = _birthToDate(existing['fechaNacimiento']); // opcional, si lo usas en el futuro
 
     await showModalBottomSheet(
       context: context,
@@ -696,9 +724,61 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                   keyboardType: TextInputType.phone,
                 ),
                 const SizedBox(height: 10),
-                _Input(controller: dniCtrl, label: 'DNI / NIE'),
+                _Input(controller: ciudadCtrl, label: 'Ciudad'),
                 const SizedBox(height: 10),
+                _Input(controller: dniCtrl, label: 'DNI / NIE'),
 
+                const SizedBox(height: 14),
+                const Text(
+                  'Datos laborales',
+                  style: TextStyle(fontWeight: FontWeight.w900, color: _textDark),
+                ),
+                const SizedBox(height: 10),
+                _Input(controller: puestoCtrl, label: 'Puesto'),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _Input(
+                        controller: edadCtrl,
+                        label: 'Edad',
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _Input(
+                        controller: expCtrl,
+                        label: 'Años exp.',
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF9FAFB),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _border),
+                  ),
+                  child: SwitchListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    title: const Text(
+                      '¿Vehículo propio?',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: _textDark,
+                        fontSize: 13,
+                      ),
+                    ),
+                    value: tieneVehiculo,
+                    onChanged: (v) => setMState(() => tieneVehiculo = v),
+                  ),
+                ),
+
+                // (Opcional) Fecha nacimiento si en el futuro quieres migrar
+                const SizedBox(height: 10),
                 GestureDetector(
                   onTap: () async {
                     final now = DateTime.now();
@@ -712,23 +792,14 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                   },
                   child: AbsorbPointer(
                     child: _Input(
-                      label: 'Fecha de nacimiento',
+                      label: 'Fecha de nacimiento (opcional)',
                       hintText: birth == null
-                          ? 'Selecciona fecha'
+                          ? 'Sin establecer'
                           : '${birth!.day.toString().padLeft(2, '0')}/${birth!.month.toString().padLeft(2, '0')}/${birth!.year}',
                       suffixIcon: const Icon(Icons.calendar_today_outlined),
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 10),
-                _Input(
-                  controller: rolesCtrl,
-                  label: 'Roles (separados por coma)',
-                  hintText: 'camarero, cocinero',
-                ),
-                const SizedBox(height: 10),
-                _Input(controller: empresaCtrl, label: 'Empresa'),
 
                 const SizedBox(height: 14),
                 SizedBox(
@@ -744,22 +815,28 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
                       ),
                     ),
                     onPressed: () async {
-                      final rolesRaw = rolesCtrl.text
-                          .split(',')
-                          .map((e) => e.trim())
-                          .where((e) => e.isNotEmpty)
-                          .toList();
+                      final int? edadParsed = int.tryParse(edadCtrl.text.trim());
+                      final int? expParsed = int.tryParse(expCtrl.text.trim());
 
                       final payload = <String, dynamic>{
-                        'nombre': nombreCtrl.text.trim(),
-                        'apellidos': apellidosCtrl.text.trim(),
-                        'telefono': telefonoCtrl.text.trim(),
-                        'dni': dniCtrl.text.trim(),
-                        'empresaNombre': empresaCtrl.text.trim(),
-                        'roles': rolesRaw,
-                        if (rolesRaw.isNotEmpty) 'rol': rolesRaw.first,
+                        'perfil': {
+                          'nombre': nombreCtrl.text.trim(),
+                          'apellidos': apellidosCtrl.text.trim(),
+                          'telefono': telefonoCtrl.text.trim(),
+                          'ciudad': ciudadCtrl.text.trim(),
+                          'dni': dniCtrl.text.trim(),
+                          'correo': email,
+                        },
+                        'laboral': {
+                          'puesto': puestoCtrl.text.trim(),
+                          'edad': edadParsed ?? 0,
+                          // Guardamos ambos si quieres compatibilidad; ideal: solo "aniosExperiencia"
+                          'añosExperiencia': expParsed ?? 0,
+                          'tieneVehiculo': tieneVehiculo,
+                        },
                         if (birth != null)
                           'fechaNacimiento': Timestamp.fromDate(birth!),
+                        'updatedAt': FieldValue.serverTimestamp(),
                       };
 
                       await ref.set(payload, SetOptions(merge: true));
@@ -787,7 +864,6 @@ class _WorkerProfileScreenState extends State<WorkerProfileScreen> {
 }
 
 // ────────────────────────── UI components ──────────────────────────
-// (tus widgets auxiliares igual que los tienes)
 
 class _SectionCard extends StatelessWidget {
   final String title;

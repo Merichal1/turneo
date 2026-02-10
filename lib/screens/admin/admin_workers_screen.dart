@@ -106,16 +106,6 @@ class _AdminWorkersScreenState extends State<AdminWorkersScreen> {
         ),
         centerTitle: false,
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: _blue,
-        foregroundColor: Colors.white,
-        onPressed: () => _openWorkerForm(context: context),
-        icon: const Icon(Icons.add),
-        label: const Text(
-          'Añadir Personal',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-      ),
       body: StreamBuilder<List<_WorkerVM>>(
         stream: stream,
         builder: (context, snapshot) {
